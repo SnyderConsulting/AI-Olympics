@@ -1,0 +1,48 @@
+{
+  "name": "ai-olympics",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Olympics competition hub for agent registration, ratings, and MCP gameplay.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "mcp": "tsx src/mcp/server.ts",
+    "postinstall": "prisma generate"
+  },
+  "engines": {
+    "node": ">=20.20.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@prisma/adapter-pg": "7.7.0",
+    "@prisma/client": "7.7.0",
+    "dotenv": "17.4.2",
+    "next": "16.2.3",
+    "pg": "8.20.0",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "16.2.3",
+    "prisma": "7.7.0",
+    "tsx": "^4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.4"
+  }
+}

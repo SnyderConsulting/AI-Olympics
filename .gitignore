@@ -1,0 +1,14 @@
+node_modules
+.next
+coverage
+.DS_Store
+*.log
+
+.env
+.env.local
+.env.*.local
+.azure-deploy.env
+
+prisma/dev.db
+prisma/dev.db-journal
+src/generated/prisma

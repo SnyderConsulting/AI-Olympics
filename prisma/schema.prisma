@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MatchStatus {
+  QUEUED
+  ACTIVE
+  FINISHED
+  CANCELLED
+}
+
+enum MatchResult {
+  PLAYER_ONE
+  PLAYER_TWO
+  DRAW
+}
+
+enum AgentKind {
+  USER
+  OFFICIAL
+}
+
+enum AgentProvider {
+  OPENAI
+  GOOGLE
+}
+
+model Agent {
+  id                   String            @id @default(cuid())
+  slug                 String            @unique
+  name                 String
+  kind                 AgentKind         @default(USER)
+  provider             AgentProvider?
+  modelId              String?
+  officialKey          String?           @unique
+  ownerName            String
+  ownerEmail           String?
+  description          String?
+  aggregateRating      Float             @default(1200)
+  aggregateGamesPlayed Int               @default(0)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  credentials          AgentCredential[]
+  queueEntries         QueueEntry[]
+  ratings              Rating[]
+  moves                MatchMove[]
+  matchesAsPlayerOne   Match[]           @relation("PlayerOneMatches")
+  matchesAsPlayerTwo   Match[]           @relation("PlayerTwoMatches")
+  wins                 Match[]           @relation("WinnerMatches")
+
+  @@index([aggregateRating])
+  @@index([kind, aggregateRating])
+}
+
+model AgentCredential {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  tokenPrefix String
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  agentId    String
+  agent      Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+model Rating {
+  id          String   @id @default(cuid())
+  gameKey     String
+  rating      Float    @default(1200)
+  gamesPlayed Int      @default(0)
+  wins        Int      @default(0)
+  losses      Int      @default(0)
+  draws       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, gameKey])
+  @@index([gameKey, rating])
+}
+
+model QueueEntry {
+  id        String   @id @default(cuid())
+  gameKey   String
+  createdAt DateTime @default(now())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([gameKey, agentId])
+  @@index([gameKey, createdAt])
+}
+
+model Match {
+  id               String      @id @default(cuid())
+  gameKey          String
+  status           MatchStatus @default(QUEUED)
+  result           MatchResult?
+  rated            Boolean     @default(true)
+  currentTurnAgentId String?
+  stateJson        String
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  playerOneId      String
+  playerTwoId      String?
+  winnerAgentId    String?
+  playerOne        Agent       @relation("PlayerOneMatches", fields: [playerOneId], references: [id], onDelete: Restrict)
+  playerTwo        Agent?      @relation("PlayerTwoMatches", fields: [playerTwoId], references: [id], onDelete: Restrict)
+  winner           Agent?      @relation("WinnerMatches", fields: [winnerAgentId], references: [id], onDelete: SetNull)
+  moves            MatchMove[]
+
+  @@index([gameKey, createdAt])
+  @@index([status, currentTurnAgentId])
+}
+
+model MatchMove {
+  id         String   @id @default(cuid())
+  moveIndex  Int
+  payloadJson String
+  createdAt  DateTime @default(now())
+  matchId    String
+  agentId    String
+  match      Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Restrict)
+
+  @@unique([matchId, moveIndex])
+  @@index([agentId, createdAt])
+}

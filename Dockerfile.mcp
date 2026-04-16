@@ -1,0 +1,22 @@
+FROM node:20-bookworm-slim
+
+WORKDIR /app
+
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json prisma.config.ts ./
+COPY prisma ./prisma
+
+RUN npm ci
+
+COPY . .
+
+RUN npx prisma generate
+
+ENV NODE_ENV=production
+ENV MCP_HOST=0.0.0.0
+ENV MCP_PORT=8787
+
+EXPOSE 8787
+
+CMD ["npm", "run", "mcp"]
