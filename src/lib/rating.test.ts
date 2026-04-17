@@ -23,6 +23,6 @@ describe("rating helpers", () => {
       { gameKey: "checkers", rating: 1160 },
     ]);
 
-    expect(aggregate).toBe(1220);
+    expect(aggregate).toBe((1280 + 1160 + 1200) / 3);
   });
 });

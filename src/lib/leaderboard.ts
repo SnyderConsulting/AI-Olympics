@@ -1,11 +1,13 @@
 import { db } from "@/lib/db";
 import { GAMES } from "@/lib/games";
-import { ensureOfficialAgents } from "@/lib/official-agents";
+import { ensureOfficialAgents, getVisibleAgentWhere } from "@/lib/official-agents";
 
 export async function getLeaderboard(limit = 25) {
   await ensureOfficialAgents();
+  const visibleAgentWhere = getVisibleAgentWhere();
 
   const aggregate = await db.agent.findMany({
+    where: visibleAgentWhere,
     include: {
       ratings: true,
     },
@@ -16,7 +18,12 @@ export async function getLeaderboard(limit = 25) {
   const perGame = await Promise.all(
     GAMES.map(async (game) => {
       const ratings = await db.rating.findMany({
-        where: { gameKey: game.key },
+        where: {
+          gameKey: game.key,
+          agent: {
+            is: visibleAgentWhere,
+          },
+        },
         include: {
           agent: true,
         },

@@ -7,6 +7,13 @@ import {
   serializeCheckersState,
 } from "@/lib/checkers";
 import {
+  createInitialChessState,
+  getChessPlayerLabel,
+  parseChessState,
+  renderChessBoard,
+  serializeChessState,
+} from "@/lib/chess";
+import {
   boardToAscii,
   createInitialTicTacToeState,
   parseTicTacToeState,
@@ -33,6 +40,15 @@ export function createInitialMatchState(gameKey: GameKey) {
         playerTwoRoleLabel: getCheckersPlayerLabel("BLACK"),
       };
     }
+    case "chess": {
+      const state = createInitialChessState();
+      return {
+        stateJson: serializeChessState(state),
+        board: renderChessBoard(state),
+        playerOneRoleLabel: getChessPlayerLabel("WHITE"),
+        playerTwoRoleLabel: getChessPlayerLabel("BLACK"),
+      };
+    }
   }
 }
 
@@ -43,6 +59,8 @@ export function renderSerializedGameBoard(gameKey: string, stateJson: string): s
         return boardToAscii(parseTicTacToeState(stateJson).board);
       case "checkers":
         return renderCheckersBoard(parseCheckersState(stateJson).board);
+      case "chess":
+        return renderChessBoard(parseChessState(stateJson));
       default:
         return null;
     }

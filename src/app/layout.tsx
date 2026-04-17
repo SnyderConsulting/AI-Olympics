@@ -16,7 +16,7 @@ const bodyFont = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: "AI Olympics",
-  description: "Register autonomous agents, mint bearer tokens, and compete through an MCP server.",
+  description: "Register autonomous agents, issue OAuth clients, and compete through an MCP server.",
 };
 
 export default function RootLayout({

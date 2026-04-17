@@ -305,7 +305,16 @@ textarea {
 
 .callout code {
   display: block;
+  line-height: 1.45;
   margin-top: 0.5rem;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.callout__code {
+  font-size: 0.94rem;
 }
 
 .section-heading {
@@ -417,6 +426,7 @@ textarea {
   display: block;
   overflow-wrap: anywhere;
   padding: 0.85rem;
+  white-space: pre-wrap;
 }
 
 .step-list {

@@ -1,8 +1,18 @@
 import { db } from "@/lib/db";
-import { ensureOfficialAgents, isReservedOfficialAgentName } from "@/lib/official-agents";
+import {
+  ensureOfficialAgents,
+  getVisibleAgentWhere,
+  isReservedOfficialAgentName,
+} from "@/lib/official-agents";
+import {
+  OAUTH_AGENT_GRANT_TYPE,
+  getOAuthResourceUri,
+  getOAuthTokenEndpointUrl,
+  issueOAuthClientCredentials,
+  OAUTH_SCOPE,
+} from "@/lib/oauth";
 import { getDefaultRatingsForAllGames } from "@/lib/rating";
 import { toSlug } from "@/lib/slug";
-import { issueAgentToken, hashAgentToken } from "@/lib/token";
 import { z } from "zod";
 
 const registerAgentSchema = z.object({
@@ -28,7 +38,7 @@ export async function registerAgent(input: RegisterAgentInput) {
   }
 
   const slug = await createUniqueSlug(parsed.agentName);
-  const issuedToken = issueAgentToken();
+  const oauthClient = issueOAuthClientCredentials();
 
   const agent = await db.agent.create({
     data: {
@@ -37,10 +47,14 @@ export async function registerAgent(input: RegisterAgentInput) {
       ownerName: parsed.ownerName,
       ownerEmail: parsed.ownerEmail || null,
       description: parsed.description || null,
-      credentials: {
+      oauthClients: {
         create: {
-          tokenHash: issuedToken.tokenHash,
-          tokenPrefix: issuedToken.tokenPrefix,
+          clientId: oauthClient.clientId,
+          clientSecretHash: oauthClient.clientSecretHash,
+          clientSecretLabel: oauthClient.clientSecretLabel,
+          displayName: `${parsed.agentName} direct runtime client`,
+          scope: OAUTH_SCOPE,
+          grantTypes: [OAUTH_AGENT_GRANT_TYPE],
         },
       },
       ratings: {
@@ -54,7 +68,14 @@ export async function registerAgent(input: RegisterAgentInput) {
 
   return {
     agent,
-    token: issuedToken.token,
+    oauth: {
+      clientId: oauthClient.clientId,
+      clientSecret: oauthClient.clientSecret,
+      grantType: OAUTH_AGENT_GRANT_TYPE,
+      scope: OAUTH_SCOPE,
+      tokenEndpoint: getOAuthTokenEndpointUrl(),
+      resource: getOAuthResourceUri(),
+    },
   };
 }
 
@@ -73,42 +94,15 @@ export async function createUniqueSlug(name: string) {
   throw new Error("Unable to create a unique slug for this agent.");
 }
 
-export async function authenticateAgentToken(rawToken: string) {
-  const tokenHash = hashAgentToken(rawToken);
-
-  const credential = await db.agentCredential.findFirst({
-    where: {
-      tokenHash,
-      revokedAt: null,
-    },
-    include: {
-      agent: {
-        include: {
-          ratings: true,
-        },
-      },
-    },
-  });
-
-  if (!credential) {
-    return null;
-  }
-
-  await db.agentCredential.update({
-    where: { id: credential.id },
-    data: { lastUsedAt: new Date() },
-  });
-
-  return credential.agent;
-}
-
 export async function getAgentBySlug(slug: string) {
   await ensureOfficialAgents();
 
-  return db.agent.findUnique({
-    where: { slug },
+  return db.agent.findFirst({
+    where: {
+      AND: [getVisibleAgentWhere(), { slug }],
+    },
     include: {
-      credentials: {
+      oauthClients: {
         orderBy: {
           createdAt: "desc",
         },
@@ -126,6 +120,7 @@ export async function listAgents() {
   await ensureOfficialAgents();
 
   return db.agent.findMany({
+    where: getVisibleAgentWhere(),
     include: {
       ratings: {
         orderBy: {

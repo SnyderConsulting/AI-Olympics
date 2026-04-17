@@ -1,32 +1,58 @@
-import { type Agent } from "@/generated/prisma/client";
+import { type Agent, Prisma } from "@/generated/prisma/client";
 import { AgentKind, AgentProvider } from "@/generated/prisma/enums";
 
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { GAMES } from "@/lib/games";
 import { OFFICIAL_AGENT_SPECS, RESERVED_OFFICIAL_AGENT_NAMES } from "@/lib/official-models";
+import { ensureAllAgentsHaveCurrentRatings } from "@/lib/rating";
 
 declare global {
   var officialAgentSyncPromise: Promise<void> | undefined;
 }
 
+const CURRENT_OFFICIAL_KEYS = new Set(
+  OFFICIAL_AGENT_SPECS.map((spec) => spec.officialKey),
+);
+const CURRENT_OFFICIAL_KEYS_LIST = OFFICIAL_AGENT_SPECS.map((spec) => spec.officialKey);
+const visibleAgentWhere = {
+  OR: [
+    {
+      kind: AgentKind.USER,
+    },
+    {
+      kind: AgentKind.OFFICIAL,
+      officialKey: {
+        in: CURRENT_OFFICIAL_KEYS_LIST,
+      },
+    },
+  ],
+} as const satisfies Prisma.AgentWhereInput;
+
 export async function ensureOfficialAgents() {
-  if (!(await officialAgentSyncRequired())) {
-    return;
+  if (await officialAgentSyncRequired()) {
+    const syncPromise = globalThis.officialAgentSyncPromise ??= syncOfficialAgents();
+
+    try {
+      await syncPromise;
+    } catch (error) {
+      throw error;
+    } finally {
+      if (globalThis.officialAgentSyncPromise === syncPromise) {
+        globalThis.officialAgentSyncPromise = undefined;
+      }
+    }
   }
 
-  globalThis.officialAgentSyncPromise ??= syncOfficialAgents();
-
-  try {
-    await globalThis.officialAgentSyncPromise;
-  } catch (error) {
-    globalThis.officialAgentSyncPromise = undefined;
-    throw error;
-  }
+  await ensureAllAgentsHaveCurrentRatings();
 }
 
 export function isReservedOfficialAgentName(name: string) {
   return RESERVED_OFFICIAL_AGENT_NAMES.has(name.trim());
+}
+
+export function getVisibleAgentWhere(): Prisma.AgentWhereInput {
+  return visibleAgentWhere;
 }
 
 export function isOfficialAgentRunnable(agent: Pick<Agent, "kind" | "provider">) {
@@ -56,7 +82,16 @@ export async function listRunnableOfficialAgents() {
     },
   });
 
-  return agents.filter(isOfficialAgentRunnable);
+  return agents.filter((agent) => {
+    if (!agent.officialKey) {
+      return false;
+    }
+
+    return (
+      CURRENT_OFFICIAL_KEYS.has(agent.officialKey) &&
+      isOfficialAgentRunnable(agent)
+    );
+  });
 }
 
 async function officialAgentSyncRequired() {
@@ -74,10 +109,6 @@ async function officialAgentSyncRequired() {
       description: true,
     },
   });
-
-  if (existingAgents.length !== OFFICIAL_AGENT_SPECS.length) {
-    return true;
-  }
 
   const agentsByOfficialKey = new Map(
     existingAgents.map((agent) => [agent.officialKey, agent]),
@@ -99,17 +130,40 @@ async function officialAgentSyncRequired() {
     }
   }
 
+  const staleDeletableAgent = await db.agent.findFirst({
+    where: {
+      kind: AgentKind.OFFICIAL,
+      officialKey: {
+        notIn: CURRENT_OFFICIAL_KEYS_LIST,
+      },
+      matchesAsPlayerOne: {
+        none: {},
+      },
+      matchesAsPlayerTwo: {
+        none: {},
+      },
+      wins: {
+        none: {},
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (staleDeletableAgent) {
+    return true;
+  }
+
   return false;
 }
 
 async function syncOfficialAgents() {
-  const officialKeys = OFFICIAL_AGENT_SPECS.map((spec) => spec.officialKey);
-
   await db.agent.deleteMany({
     where: {
       kind: AgentKind.OFFICIAL,
       officialKey: {
-        notIn: officialKeys,
+        notIn: CURRENT_OFFICIAL_KEYS_LIST,
       },
       matchesAsPlayerOne: {
         none: {},

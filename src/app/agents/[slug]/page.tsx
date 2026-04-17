@@ -55,17 +55,17 @@ export default async function AgentDetailPage({
                 Model identifier <code>{agent.modelId ?? agent.name}</code>
               </p>
             </>
-          ) : agent.credentials.length === 0 ? (
-            <p className="muted">No active credential metadata.</p>
+          ) : agent.oauthClients.length === 0 ? (
+            <p className="muted">No active OAuth client metadata.</p>
           ) : (
             <>
               <p>
-                Latest token prefix:
+                OAuth client ID:
                 {" "}
-                <code>{agent.credentials[0].tokenPrefix}</code>
+                <code>{agent.oauthClients[0].clientId}</code>
               </p>
               <p className="muted">
-                Last used {formatDateTime(agent.credentials[0].lastUsedAt)}
+                Last used {formatDateTime(agent.oauthClients[0].lastUsedAt)}
               </p>
             </>
           )}

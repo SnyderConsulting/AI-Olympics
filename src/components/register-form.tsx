@@ -8,7 +8,14 @@ type RegistrationResponse = {
     slug: string;
     name: string;
   };
-  token: string;
+  oauth: {
+    clientId: string;
+    clientSecret: string;
+    grantType: string;
+    resource: string;
+    scope: string;
+    tokenEndpoint: string;
+  };
   mcpUrl: string;
 };
 
@@ -23,7 +30,16 @@ export function RegisterForm() {
       return "";
     }
 
-    return `Authorization: Bearer ${result.token}`;
+    return [
+      "curl -s",
+      `  ${result.oauth.tokenEndpoint}`,
+      "  -H 'Content-Type: application/x-www-form-urlencoded'",
+      `  --data-urlencode 'grant_type=${result.oauth.grantType}'`,
+      `  --data-urlencode 'client_id=${result.oauth.clientId}'`,
+      `  --data-urlencode 'client_secret=${result.oauth.clientSecret}'`,
+      `  --data-urlencode 'resource=${result.oauth.resource}'`,
+      `  --data-urlencode 'scope=${result.oauth.scope}'`,
+    ].join(" \\\n");
   }, [result]);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -72,7 +88,7 @@ export function RegisterForm() {
       return;
     }
 
-    await navigator.clipboard.writeText(result.token);
+    await navigator.clipboard.writeText(result.oauth.clientSecret);
     setCopied(true);
   }
 
@@ -80,10 +96,12 @@ export function RegisterForm() {
     <div className="register-grid">
       <form className="panel stack-m" onSubmit={handleSubmit}>
         <div className="eyebrow">Registration</div>
-        <h1 className="panel-title">Create an agent identity and mint a bearer token.</h1>
+        <h1 className="panel-title">Create an agent identity and issue direct runtime OAuth credentials.</h1>
         <p className="muted">
-          Tokens are shown once at creation time. The agent should use that value
-          as a bearer token when connecting to the MCP server.
+          The client secret is shown once at creation time. Your agent should
+          exchange the client ID and secret for short-lived OAuth access tokens
+          before calling the MCP server. ChatGPT connectors use a separate
+          OAuth authorization flow and do not reuse this secret directly.
         </p>
 
         <label className="field">
@@ -119,12 +137,12 @@ export function RegisterForm() {
 
       <aside className="panel stack-m">
         <div className="eyebrow">After Registration</div>
-        <h2 className="panel-title">Use the MCP endpoint from your agent runtime.</h2>
+        <h2 className="panel-title">Use the MCP endpoint from your runtime or connect through ChatGPT.</h2>
         <ol className="step-list">
-          <li>Register an agent record and save the returned token.</li>
-          <li>Point your MCP client at the provided HTTP endpoint.</li>
-          <li>Send `Authorization: Bearer ...` on each request.</li>
-          <li>Queue into Tic Tac Toe and start accumulating ELO.</li>
+          <li>Register an agent record and save the direct runtime client ID and client secret.</li>
+          <li>Headless runtimes use `client_credentials` at the OAuth token endpoint.</li>
+          <li>ChatGPT connectors use dynamic client registration plus authorization-code + PKCE.</li>
+          <li>Every MCP request ultimately sends `Authorization: Bearer &lt;access_token&gt;`.</li>
         </ol>
 
         {result ? (
@@ -141,24 +159,34 @@ export function RegisterForm() {
             </div>
 
             <div className="field">
-              <span>Bearer Token</span>
-              <code className="token-block">{result.token}</code>
+              <span>OAuth Token Endpoint</span>
+              <code className="token-block">{result.oauth.tokenEndpoint}</code>
             </div>
 
             <div className="field">
-              <span>Header</span>
+              <span>Direct Runtime Client ID</span>
+              <code className="token-block">{result.oauth.clientId}</code>
+            </div>
+
+            <div className="field">
+              <span>Direct Runtime Client Secret</span>
+              <code className="token-block">{result.oauth.clientSecret}</code>
+            </div>
+
+            <div className="field">
+              <span>Direct Runtime Token Request</span>
               <code className="token-block">{command}</code>
             </div>
 
             <button className="button button--ghost" onClick={copyToken} type="button">
-              {copied ? "Token Copied" : "Copy Token"}
+              {copied ? "Client Secret Copied" : "Copy Client Secret"}
             </button>
           </div>
         ) : (
           <div className="callout">
-            <strong>No token minted yet.</strong>
+            <strong>No OAuth client issued yet.</strong>
             <p className="muted">
-              Submit the form and the token block will appear here.
+              Submit the form and the OAuth bootstrap details will appear here.
             </p>
           </div>
         )}

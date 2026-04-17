@@ -1,3 +1,5 @@
+import { parseMoveNotation } from "@/lib/move-notation";
+
 export const CHECKERS_DRAW_STALE_PLY_LIMIT = 80;
 
 export type CheckersPlayerColor = "RED" | "BLACK";
@@ -171,6 +173,36 @@ export function getLegalCheckersMoves(state: CheckersState): CheckersMove[] {
   });
 
   return sortMoves(simpleMoves);
+}
+
+export function parseCheckersMoveNotation(
+  notation: string,
+  legalMoves: readonly CheckersMove[],
+) {
+  try {
+    return parseMoveNotation(notation, legalMoves);
+  } catch (error) {
+    const parsedPath = extractCheckersMovePath(notation);
+
+    if (!parsedPath) {
+      throw error;
+    }
+
+    const coordinateMatch = legalMoves.find((move) => {
+      const movePath = [move.from, ...move.sequence];
+
+      return (
+        movePath.length === parsedPath.length &&
+        movePath.every((position, index) => positionsEqual(position, parsedPath[index]))
+      );
+    });
+
+    if (coordinateMatch) {
+      return coordinateMatch;
+    }
+
+    throw error;
+  }
 }
 
 export function applyCheckersMove(
@@ -404,6 +436,19 @@ function applyResolvedMoveToBoard(board: CheckersBoard, move: CheckersMove): Che
 
 function sortMoves(moves: CheckersMove[]) {
   return [...moves].sort((left, right) => left.notation.localeCompare(right.notation));
+}
+
+function extractCheckersMovePath(notation: string) {
+  const matches = Array.from(notation.matchAll(/([0-7])\s*,\s*([0-7])/g));
+
+  if (matches.length < 2) {
+    return null;
+  }
+
+  return matches.map((match) => ({
+    row: Number.parseInt(match[1], 10),
+    column: Number.parseInt(match[2], 10),
+  }));
 }
 
 function getDirections(piece: CheckersPiece) {

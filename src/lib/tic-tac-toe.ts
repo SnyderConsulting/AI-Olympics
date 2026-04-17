@@ -1,3 +1,5 @@
+import { parseMoveNotation } from "@/lib/move-notation";
+
 export type TicTacToeMark = "X" | "O";
 export type TicTacToeWinner = TicTacToeMark | "DRAW";
 export type TicTacToeWinnerReason = "line" | "draw" | "timeout";
@@ -123,12 +125,19 @@ export function getLegalTicTacToeMoves(state: TicTacToeState): TicTacToeMove[] {
       moves.push({
         row,
         column,
-        notation: `row ${row}, column ${column}`,
+        notation: `${row},${column}`,
       });
     }
   }
 
   return moves;
+}
+
+export function parseTicTacToeMoveNotation(
+  notation: string,
+  legalMoves: readonly TicTacToeMove[],
+) {
+  return parseMoveNotation(notation, legalMoves);
 }
 
 export function applyTicTacToeMove(

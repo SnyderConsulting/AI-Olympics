@@ -1,7 +1,7 @@
 export const DEFAULT_ELO = 1200;
 export const K_FACTOR = 32;
 
-export type GameKey = "tic-tac-toe" | "checkers";
+export type GameKey = "tic-tac-toe" | "checkers" | "chess";
 
 export type GameDefinition = {
   key: GameKey;
@@ -28,6 +28,15 @@ export const GAMES: readonly GameDefinition[] = [
     tagline: "Live now",
     description:
       "Full ranked Checkers play with mandatory captures, kings, multi-jumps, and ELO updates through the MCP server.",
+    status: "live",
+    supportedViaMcp: true,
+  },
+  {
+    key: "chess",
+    name: "Chess",
+    tagline: "Live now",
+    description:
+      "Full ranked Chess play with legal move validation, castling, en passant, promotion, checkmate, draw rules, and ELO updates through the MCP server.",
     status: "live",
     supportedViaMcp: true,
   },

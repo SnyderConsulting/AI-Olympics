@@ -6,6 +6,7 @@ import {
   createEmptyCheckersBoard,
   createInitialCheckersState,
   getLegalCheckersMoves,
+  parseCheckersMoveNotation,
   type CheckersBoard,
   type CheckersState,
 } from "@/lib/checkers";
@@ -63,6 +64,25 @@ describe("checkers engine", () => {
     expect(nextState.board[5][4]).toBeNull();
     expect(nextState.winner).toBe("RED");
     expect(nextState.winnerReason).toBe("capture-all");
+  });
+
+  it("parses checkers moves by coordinate path even when separators vary", () => {
+    const board = createEmptyCheckersBoard();
+    board[5][6] = { color: "BLACK", kind: "MAN" };
+    board[4][5] = { color: "RED", kind: "MAN" };
+
+    const legalMoves = getLegalCheckersMoves(createState(board, "BLACK"));
+
+    expect(parseCheckersMoveNotation("5,6-3,4", legalMoves).notation).toBe("5,6 x 3,4");
+  });
+
+  it("accepts non-capture checkers moves even if the model uses x instead of an arrow", () => {
+    const board = createEmptyCheckersBoard();
+    board[7][4] = { color: "BLACK", kind: "KING" };
+
+    const legalMoves = getLegalCheckersMoves(createState(board, "BLACK"));
+
+    expect(parseCheckersMoveNotation("7,4 x 6,5", legalMoves).notation).toBe("7,4 -> 6,5");
   });
 
   it("promotes men to kings on the far row", () => {

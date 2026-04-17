@@ -6,22 +6,44 @@ import {
   applyCheckersMove,
   getCheckersPlayerColor,
   getLegalCheckersMoves,
+  parseCheckersMoveNotation,
   parseCheckersState,
   renderCheckersBoard,
   serializeCheckersState,
-  type CheckersPosition,
   type CheckersWinner,
 } from "@/lib/checkers";
+import {
+  applyChessForfeit,
+  applyChessMove,
+  getChessPlayerColor,
+  getLegalChessMoves,
+  hydrateChess,
+  parseChessMoveNotation,
+  parseChessState,
+  renderChessBoard,
+  serializeChessState,
+  type ChessWinner,
+} from "@/lib/chess";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { createInitialMatchState, renderSerializedGameBoard } from "@/lib/game-state";
 import { getGameDefinition, type GameKey } from "@/lib/games";
-import { chooseOfficialCheckersMove, chooseOfficialTicTacToeMove } from "@/lib/official-player";
-import { ensureOfficialAgents, isOfficialAgentRunnable, listRunnableOfficialAgents } from "@/lib/official-agents";
+import {
+  chooseOfficialCheckersMove,
+  chooseOfficialChessMove,
+  chooseOfficialTicTacToeMove,
+} from "@/lib/official-player";
+import {
+  ensureOfficialAgents,
+  getVisibleAgentWhere,
+  isOfficialAgentRunnable,
+  listRunnableOfficialAgents,
+} from "@/lib/official-agents";
 import {
   applyEloResult,
   assertGameKey,
   computeAggregateRating,
+  ensureAllAgentsHaveCurrentRatings,
   type MatchOutcome,
 } from "@/lib/rating";
 import {
@@ -30,6 +52,7 @@ import {
   boardToAscii,
   getLegalTicTacToeMoves,
   getPlayerMark,
+  parseTicTacToeMoveNotation,
   parseTicTacToeState,
   serializeTicTacToeState,
 } from "@/lib/tic-tac-toe";
@@ -79,8 +102,17 @@ export function ensureMatchTimeoutWorker() {
 
 export async function getRecentMatches(limit = 12) {
   await sweepTimedOutMatches();
+  const visibleAgentWhere = getVisibleAgentWhere();
 
   return db.match.findMany({
+    where: {
+      playerOne: {
+        is: visibleAgentWhere,
+      },
+      playerTwo: {
+        is: visibleAgentWhere,
+      },
+    },
     include: {
       playerOne: true,
       playerTwo: true,
@@ -98,9 +130,16 @@ export async function getRecentMatches(limit = 12) {
 
 export async function getAgentRecentMatches(agentId: string, limit = 10) {
   await sweepTimedOutMatchesForAgent(agentId);
+  const visibleAgentWhere = getVisibleAgentWhere();
 
   return db.match.findMany({
     where: {
+      playerOne: {
+        is: visibleAgentWhere,
+      },
+      playerTwo: {
+        is: visibleAgentWhere,
+      },
       OR: [{ playerOneId: agentId }, { playerTwoId: agentId }],
     },
     include: {
@@ -120,17 +159,87 @@ export async function getAgentRecentMatches(agentId: string, limit = 10) {
 
 export async function getCompetitionSnapshot() {
   await ensureOfficialAgents();
+  const visibleAgentWhere = getVisibleAgentWhere();
+  const onlineCutoff = new Date(Date.now() - 30 * 60 * 1000);
 
-  const [agentCount, matchCount, queueCount] = await Promise.all([
-    db.agent.count(),
-    db.match.count(),
-    db.queueEntry.count(),
+  const [agentCount, matchCount, onlineAgentCount] = await Promise.all([
+    db.agent.count({
+      where: visibleAgentWhere,
+    }),
+    db.match.count({
+      where: {
+        playerOne: {
+          is: visibleAgentWhere,
+        },
+        playerTwo: {
+          is: visibleAgentWhere,
+        },
+      },
+    }),
+    db.agent.count({
+      where: {
+        AND: [
+          visibleAgentWhere,
+          {
+            OR: [
+              {
+                oauthClients: {
+                  some: {
+                    revokedAt: null,
+                    lastUsedAt: {
+                      gte: onlineCutoff,
+                    },
+                  },
+                },
+              },
+              {
+                oauthAccessTokens: {
+                  some: {
+                    revokedAt: null,
+                    lastUsedAt: {
+                      gte: onlineCutoff,
+                    },
+                  },
+                },
+              },
+              {
+                queueEntries: {
+                  some: {
+                    createdAt: {
+                      gte: onlineCutoff,
+                    },
+                  },
+                },
+              },
+              {
+                matchesAsPlayerOne: {
+                  some: {
+                    updatedAt: {
+                      gte: onlineCutoff,
+                    },
+                  },
+                },
+              },
+              {
+                matchesAsPlayerTwo: {
+                  some: {
+                    updatedAt: {
+                      gte: onlineCutoff,
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    }),
   ]);
 
   return {
     agentCount,
     matchCount,
-    queueCount,
+    onlineAgentCount,
   };
 }
 
@@ -644,6 +753,13 @@ function createForfeitStateJson(match: MatchWithDetails, outcome: MatchOutcome) 
     );
   }
 
+  if (match.gameKey === "chess") {
+    const state = parseChessState(match.stateJson);
+    return serializeChessState(
+      applyChessForfeit(state, outcome === "playerOne" ? "WHITE" : "BLACK"),
+    );
+  }
+
   const state = parseCheckersState(match.stateJson);
   return serializeCheckersState(
     applyCheckersForfeit(state, outcome === "playerOne" ? "RED" : "BLACK"),
@@ -704,11 +820,44 @@ export async function getCheckersMatchStateForAgent(args: {
   };
 }
 
+export async function getChessMatchStateForAgent(args: {
+  agentId: string;
+  matchId: string;
+}) {
+  const match = await playOfficialTurnsUntilHumanOrFinished(args.matchId);
+
+  if (!match || match.gameKey !== "chess") {
+    throw new Error("Match not found.");
+  }
+
+  if (match.playerOneId !== args.agentId && match.playerTwoId !== args.agentId) {
+    throw new Error("You are not a participant in this match.");
+  }
+
+  const state = parseChessState(match.stateJson);
+  const pieceColor = getChessPlayerColor(match.playerOneId === args.agentId);
+  const isYourTurn =
+    match.status === MatchStatus.ACTIVE && match.currentTurnAgentId === args.agentId;
+  const chess = hydrateChess(state);
+
+  return {
+    match,
+    board: renderChessBoard(state),
+    fen: state.fen,
+    pieceColor,
+    isYourTurn,
+    isCheck: chess.isCheck(),
+    legalMoves: isYourTurn ? getLegalChessMoves(state) : [],
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    turnCount: state.turnCount,
+  };
+}
+
 export async function playTicTacToeTurn(args: {
   agentId: string;
   matchId: string;
-  row: number;
-  column: number;
+  notation: string;
 }, options?: { autoPlayOfficialFollowUp?: boolean }) {
   await resolveTimedOutMatch(args.matchId);
 
@@ -735,8 +884,9 @@ export async function playTicTacToeTurn(args: {
     }
 
     const state = parseTicTacToeState(match.stateJson);
+    const move = parseTicTacToeMoveNotation(args.notation, getLegalTicTacToeMoves(state));
     const mark = getPlayerMark(match.playerOneId === args.agentId);
-    const nextState = applyTicTacToeMove(state, args.row, args.column, mark);
+    const nextState = applyTicTacToeMove(state, move.row, move.column, mark);
     const isFinished = nextState.winner !== null;
     const nextTurnAgentId = isFinished
       ? null
@@ -774,8 +924,9 @@ export async function playTicTacToeTurn(args: {
             agentId: args.agentId,
             moveIndex: match.moves.length,
             payloadJson: JSON.stringify({
-              row: args.row,
-              column: args.column,
+              notation: move.notation,
+              row: move.row,
+              column: move.column,
               mark,
             }),
           },
@@ -817,9 +968,7 @@ export async function playTicTacToeTurn(args: {
 export async function playCheckersTurn(args: {
   agentId: string;
   matchId: string;
-  fromRow: number;
-  fromColumn: number;
-  sequence: CheckersPosition[];
+  notation: string;
 }, options?: { autoPlayOfficialFollowUp?: boolean }) {
   await resolveTimedOutMatch(args.matchId);
 
@@ -846,10 +995,11 @@ export async function playCheckersTurn(args: {
     }
 
     const state = parseCheckersState(match.stateJson);
+    const move = parseCheckersMoveNotation(args.notation, getLegalCheckersMoves(state));
     const nextState = applyCheckersMove(state, {
-      fromRow: args.fromRow,
-      fromColumn: args.fromColumn,
-      sequence: args.sequence,
+      fromRow: move.from.row,
+      fromColumn: move.from.column,
+      sequence: move.sequence,
     });
     const isFinished = nextState.winner !== null;
     const nextTurnAgentId = isFinished
@@ -882,10 +1032,10 @@ export async function playCheckersTurn(args: {
             agentId: args.agentId,
             moveIndex: match.moves.length,
             payloadJson: JSON.stringify({
-              from: { row: args.fromRow, column: args.fromColumn },
-              sequence: args.sequence,
-              notation: moveRecord?.notation ?? null,
-              captures: moveRecord?.captures ?? [],
+              from: move.from,
+              sequence: move.sequence,
+              notation: move.notation,
+              captures: move.captures,
             }),
           },
         },
@@ -921,6 +1071,122 @@ export async function playCheckersTurn(args: {
   return {
     match: hydratedMatch,
     board: renderCheckersBoard(state.board),
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    lastMove: state.lastMove,
+  };
+}
+
+export async function playChessTurn(args: {
+  agentId: string;
+  matchId: string;
+  notation: string;
+}, options?: { autoPlayOfficialFollowUp?: boolean }) {
+  await resolveTimedOutMatch(args.matchId);
+
+  const result = await db.$transaction(async (tx) => {
+    const match = await tx.match.findUnique({
+      where: { id: args.matchId },
+      include: matchInclude,
+    });
+
+    if (!match || match.gameKey !== "chess") {
+      throw new Error("Match not found.");
+    }
+
+    if (match.status !== MatchStatus.ACTIVE) {
+      throw new Error("This match is not active.");
+    }
+
+    if (!match.playerTwoId || !match.playerTwo) {
+      throw new Error("This match is missing an opponent.");
+    }
+
+    if (match.currentTurnAgentId !== args.agentId) {
+      throw new Error("It is not your turn.");
+    }
+
+    const state = parseChessState(match.stateJson);
+    const move = parseChessMoveNotation(
+      args.notation,
+      getLegalChessMoves(state),
+      state,
+    );
+    const nextState = applyChessMove(state, move);
+    const isFinished = nextState.winner !== null;
+    const nextTurnAgentId = isFinished
+      ? null
+      : args.agentId === match.playerOneId
+        ? match.playerTwoId
+        : match.playerOneId;
+    const matchResult = nextState.winner
+      ? fromChessWinner(nextState.winner)
+      : null;
+    const winnerAgentId =
+      nextState.winner === "WHITE"
+        ? match.playerOneId
+        : nextState.winner === "BLACK"
+          ? match.playerTwoId
+          : null;
+    const moveRecord = nextState.lastMove;
+
+    const updatedMatch = await tx.match.update({
+      where: { id: match.id },
+      data: {
+        currentTurnAgentId: nextTurnAgentId,
+        finishedAt: isFinished ? new Date() : null,
+        result: matchResult,
+        stateJson: serializeChessState(nextState),
+        status: isFinished ? MatchStatus.FINISHED : MatchStatus.ACTIVE,
+        winnerAgentId,
+        moves: {
+          create: {
+            agentId: args.agentId,
+            moveIndex: match.moves.length,
+            payloadJson: JSON.stringify({
+              notation: move.notation,
+              san: move.san,
+              lan: move.lan,
+              from: move.from,
+              to: move.to,
+              piece: move.piece,
+              captured: move.captured,
+              promotion: move.promotion,
+            }),
+          },
+        },
+      },
+      include: matchInclude,
+    });
+
+    if (isFinished && matchResult) {
+      await applyRatingsForCompletedMatch(tx, {
+        gameKey: "chess",
+        playerOneId: match.playerOneId,
+        playerTwoId: match.playerTwoId,
+        outcome: toOutcome(matchResult),
+      });
+    }
+
+    return {
+      match: updatedMatch,
+      board: renderChessBoard(nextState),
+      winner: nextState.winner,
+      winnerReason: nextState.winnerReason,
+      lastMove: moveRecord,
+    };
+  });
+
+  if (options?.autoPlayOfficialFollowUp === false) {
+    return result;
+  }
+
+  const hydratedMatch = await playOfficialTurnsUntilHumanOrFinished(result.match.id);
+  const state = parseChessState(hydratedMatch.stateJson);
+
+  return {
+    match: hydratedMatch,
+    board: renderChessBoard(state),
     winner: state.winner,
     winnerReason: state.winnerReason,
     lastMove: state.lastMove,
@@ -968,8 +1234,7 @@ async function playOfficialTurnsUntilHumanOrFinished(matchId: string) {
           {
             agentId: officialAgent.id,
             matchId: match.id,
-            row: move.row,
-            column: move.column,
+            notation: move.notation,
           },
           {
             autoPlayOfficialFollowUp: false,
@@ -1000,9 +1265,39 @@ async function playOfficialTurnsUntilHumanOrFinished(matchId: string) {
           {
             agentId: officialAgent.id,
             matchId: match.id,
-            fromRow: move.from.row,
-            fromColumn: move.from.column,
-            sequence: move.sequence,
+            notation: move.notation,
+          },
+          {
+            autoPlayOfficialFollowUp: false,
+          },
+        );
+      } catch (error) {
+        console.warn(`Official move failed for ${officialAgent.name}; forfeiting match ${match.id}.`, error);
+        return forfeitMatch(match.id, officialAgent.id);
+      }
+    } else if (match.gameKey === "chess") {
+      const state = parseChessState(match.stateJson);
+      const legalMoves = getLegalChessMoves(state);
+
+      if (legalMoves.length === 0) {
+        return match;
+      }
+
+      try {
+        const move = await chooseOfficialChessMove({
+          provider: officialAgent.provider,
+          modelId: officialAgent.modelId ?? officialAgent.name,
+          board: renderChessBoard(state),
+          legalMoves,
+          color: getChessPlayerColor(match.playerOneId === officialAgent.id),
+          state,
+        });
+
+        await playChessTurn(
+          {
+            agentId: officialAgent.id,
+            matchId: match.id,
+            notation: move.notation,
           },
           {
             autoPlayOfficialFollowUp: false,
@@ -1115,6 +1410,8 @@ async function applyRatingsForCompletedMatch(
     outcome: MatchOutcome;
   },
 ) {
+  await ensureAllAgentsHaveCurrentRatings(tx);
+
   const [playerOneRating, playerTwoRating] = await Promise.all([
     tx.rating.findUniqueOrThrow({
       where: {
@@ -1197,6 +1494,17 @@ function fromOutcome(outcome: MatchOutcome): MatchResult {
 function fromCheckersWinner(winner: CheckersWinner): MatchResult {
   switch (winner) {
     case "RED":
+      return MatchResult.PLAYER_ONE;
+    case "BLACK":
+      return MatchResult.PLAYER_TWO;
+    case "DRAW":
+      return MatchResult.DRAW;
+  }
+}
+
+function fromChessWinner(winner: ChessWinner): MatchResult {
+  switch (winner) {
+    case "WHITE":
       return MatchResult.PLAYER_ONE;
     case "BLACK":
       return MatchResult.PLAYER_TWO;

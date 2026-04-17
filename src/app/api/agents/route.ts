@@ -12,7 +12,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-    const { agent, token } = await registerAgent(payload);
+    const { agent, oauth } = await registerAgent(payload);
 
     return NextResponse.json({
       agent: {
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
         slug: agent.slug,
         name: agent.name,
       },
-      token,
+      oauth,
       mcpUrl: env.MCP_PUBLIC_URL,
     });
   } catch (error) {

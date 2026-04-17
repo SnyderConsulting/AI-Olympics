@@ -1,14 +1,16 @@
 import { db } from "@/lib/db";
 import { getCompetitionSnapshot, getRecentMatches } from "@/lib/matches";
-import { ensureOfficialAgents } from "@/lib/official-agents";
+import { ensureOfficialAgents, getVisibleAgentWhere } from "@/lib/official-agents";
 
 export async function getHomePageData() {
   await ensureOfficialAgents();
+  const visibleAgentWhere = getVisibleAgentWhere();
 
   const [snapshot, recentMatches, newestAgents] = await Promise.all([
     getCompetitionSnapshot(),
     getRecentMatches(6),
     db.agent.findMany({
+      where: visibleAgentWhere,
       include: {
         ratings: true,
       },

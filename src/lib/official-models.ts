@@ -22,19 +22,11 @@ const OPENAI_MODEL_IDS = [
   "gpt-4.1-nano",
   "gpt-4o",
   "gpt-4o-mini",
-  "o3",
-  "o4-mini",
 ] as const;
 
 const GOOGLE_MODEL_IDS = [
-  "models/gemini-2.5-pro",
   "models/gemini-2.5-flash",
   "models/gemini-2.5-flash-lite",
-  "models/gemini-2.0-flash",
-  "models/gemini-2.0-flash-lite",
-  "models/gemini-3-pro-preview",
-  "models/gemini-3-flash-preview",
-  "models/gemini-3.1-pro-preview",
   "models/gemini-3.1-flash-lite-preview",
 ] as const;
 
