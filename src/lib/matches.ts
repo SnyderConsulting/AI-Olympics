@@ -54,6 +54,7 @@ import {
   getPlayerMark,
   parseTicTacToeMoveNotation,
   parseTicTacToeState,
+  renderTicTacToeBoard,
   serializeTicTacToeState,
 } from "@/lib/tic-tac-toe";
 
@@ -788,6 +789,70 @@ export async function listMatchesForAgent(agentId: string) {
   });
 }
 
+export async function getTicTacToeMatchStateForAgent(args: {
+  agentId: string;
+  matchId: string;
+}) {
+  const match = await playOfficialTurnsUntilHumanOrFinished(args.matchId);
+
+  if (!match || match.gameKey !== "tic-tac-toe") {
+    throw new Error("Match not found.");
+  }
+
+  assertAgentIsMatchParticipant(match, args.agentId);
+
+  const state = parseTicTacToeState(match.stateJson);
+  const mark = getPlayerMark(match.playerOneId === args.agentId);
+  const isYourTurn =
+    match.status === MatchStatus.ACTIVE && match.currentTurnAgentId === args.agentId;
+  const timing = getMatchTurnTiming(match);
+
+  return {
+    match,
+    board: renderTicTacToeBoard(state.board),
+    mark,
+    isYourTurn,
+    legalMoves: isYourTurn ? getLegalTicTacToeMoves(state) : [],
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    turnCount: state.turnCount,
+    winningLine: state.winningLine,
+    currentTurnAgentName: getCurrentTurnAgentName(match),
+    turnDeadlineAt: timing.turnDeadlineAt,
+    secondsRemaining: timing.secondsRemaining,
+    moveTimeoutSeconds: env.MATCH_MOVE_TIMEOUT_SECONDS,
+  };
+}
+
+export async function waitForTurnOrMatchEndForAgent(args: {
+  agentId: string;
+  matchId: string;
+  maxWaitSeconds?: number;
+}) {
+  const maxWaitMs = Math.max(0, (args.maxWaitSeconds ?? 25) * 1000);
+  const waitDeadline = Date.now() + maxWaitMs;
+  let match = await playOfficialTurnsUntilHumanOrFinished(args.matchId);
+
+  assertAgentIsMatchParticipant(match, args.agentId);
+
+  while (
+    match.status === MatchStatus.ACTIVE &&
+    match.currentTurnAgentId !== args.agentId &&
+    Date.now() < waitDeadline
+  ) {
+    await sleep(Math.min(MATCHMAKING_POLL_INTERVAL_MS, waitDeadline - Date.now()));
+    match = await playOfficialTurnsUntilHumanOrFinished(args.matchId);
+  }
+
+  return {
+    match,
+    timedOutWaiting:
+      match.status === MatchStatus.ACTIVE &&
+      match.currentTurnAgentId !== args.agentId &&
+      Date.now() >= waitDeadline,
+  };
+}
+
 export async function getCheckersMatchStateForAgent(args: {
   agentId: string;
   matchId: string;
@@ -946,8 +1011,9 @@ export async function playTicTacToeTurn(args: {
 
     return {
       match: updatedMatch,
-      board: boardToAscii(nextState.board),
+      board: renderTicTacToeBoard(nextState.board),
       winner: nextState.winner,
+      winnerReason: nextState.winnerReason,
     };
   });
 
@@ -960,8 +1026,9 @@ export async function playTicTacToeTurn(args: {
 
   return {
     match: hydratedMatch,
-    board: boardToAscii(state.board),
+    board: renderTicTacToeBoard(state.board),
     winner: state.winner,
+    winnerReason: state.winnerReason,
   };
 }
 
@@ -1315,6 +1382,12 @@ async function playOfficialTurnsUntilHumanOrFinished(matchId: string) {
   return match;
 }
 
+function assertAgentIsMatchParticipant(match: MatchWithDetails, agentId: string) {
+  if (match.playerOneId !== agentId && match.playerTwoId !== agentId) {
+    throw new Error("You are not a participant in this match.");
+  }
+}
+
 function getCurrentTurnOfficialAgent(match: MatchWithDetails) {
   if (!match.currentTurnAgentId) {
     return null;
@@ -1531,8 +1604,9 @@ export function serializeMatchForMcp(match: Prisma.MatchGetPayload<{
     winner: true;
     moves: true;
   };
-}>) {
+}>, agentId?: string) {
   const board = renderSerializedGameBoard(match.gameKey, match.stateJson);
+  const timing = getMatchTurnTiming(match);
 
   return {
     id: match.id,
@@ -1540,11 +1614,59 @@ export function serializeMatchForMcp(match: Prisma.MatchGetPayload<{
     status: match.status,
     result: match.result,
     currentTurnAgentId: match.currentTurnAgentId,
+    currentTurnAgentName: getCurrentTurnAgentName(match),
+    isYourTurn:
+      agentId && match.status === MatchStatus.ACTIVE
+        ? match.currentTurnAgentId === agentId
+        : null,
     playerOne: match.playerOne.name,
     playerTwo: match.playerTwo?.name ?? null,
     winner: match.winner?.name ?? null,
     board: board ?? "Board state unavailable",
     moveCount: match.moves.length,
     updatedAt: match.updatedAt.toISOString(),
+    turnDeadlineAt: timing.turnDeadlineAt,
+    secondsRemaining: timing.secondsRemaining,
+    moveTimeoutSeconds: env.MATCH_MOVE_TIMEOUT_SECONDS,
+  };
+}
+
+function getCurrentTurnAgentName(match: Pick<MatchWithDetails, "currentTurnAgentId" | "playerOneId" | "playerOne" | "playerTwoId" | "playerTwo">) {
+  if (!match.currentTurnAgentId) {
+    return null;
+  }
+
+  if (match.currentTurnAgentId === match.playerOneId) {
+    return match.playerOne.name;
+  }
+
+  if (match.currentTurnAgentId === match.playerTwoId) {
+    return match.playerTwo?.name ?? null;
+  }
+
+  return null;
+}
+
+function getMatchTurnTiming(
+  match: Pick<MatchWithDetails, "status" | "currentTurnAgentId" | "updatedAt">,
+  referenceDate = new Date(),
+) {
+  if (match.status !== MatchStatus.ACTIVE || !match.currentTurnAgentId) {
+    return {
+      turnDeadlineAt: null,
+      secondsRemaining: null,
+    };
+  }
+
+  const turnDeadline = new Date(
+    match.updatedAt.getTime() + env.MATCH_MOVE_TIMEOUT_SECONDS * 1000,
+  );
+
+  return {
+    turnDeadlineAt: turnDeadline.toISOString(),
+    secondsRemaining: Math.max(
+      0,
+      Math.ceil((turnDeadline.getTime() - referenceDate.getTime()) / 1000),
+    ),
   };
 }

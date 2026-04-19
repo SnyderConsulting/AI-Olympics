@@ -1,0 +1,129 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+      NEXT_TELEMETRY_DISABLED: "1"
+      COMPETITION_ADMIN_SECRET: ci-placeholder-admin-secret
+      MCP_HOST: 127.0.0.1
+      MCP_PORT: 8787
+      MCP_PUBLIC_URL: http://127.0.0.1:8787/mcp
+      OAUTH_AUTHORIZATION_CODE_TTL_SECONDS: "600"
+      OAUTH_ACCESS_TOKEN_TTL_SECONDS: "3600"
+      OAUTH_REFRESH_TOKEN_TTL_SECONDS: "2592000"
+      MATCHMAKING_PLATFORM_FALLBACK_SECONDS: "10"
+      MATCH_MOVE_TIMEOUT_SECONDS: "30"
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Detect runner public IP
+        id: runner_ip
+        run: |
+          echo "ip=$(curl -fsSL https://api.ipify.org)" >> "$GITHUB_OUTPUT"
+
+      - name: Allow runner through Postgres firewall
+        id: firewall_rule
+        run: |
+          RULE_NAME="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          az postgres flexible-server firewall-rule create \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ vars.AZURE_POSTGRES_SERVER }}" \
+            --rule-name "$RULE_NAME" \
+            --start-ip-address "${{ steps.runner_ip.outputs.ip }}" \
+            --end-ip-address "${{ steps.runner_ip.outputs.ip }}"
+          echo "name=$RULE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Apply Prisma migrations
+        env:
+          DATABASE_URL: ${{ secrets.AZURE_DATABASE_URL }}
+          DATABASE_SSL: "true"
+        run: npx prisma migrate deploy
+
+      - name: Remove runner Postgres firewall rule
+        if: ${{ always() && steps.firewall_rule.outputs.name != '' }}
+        run: |
+          az postgres flexible-server firewall-rule delete \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ vars.AZURE_POSTGRES_SERVER }}" \
+            --rule-name "${{ steps.firewall_rule.outputs.name }}" \
+            --yes
+
+      - name: Build web image in ACR
+        run: |
+          az acr build \
+            --registry "${{ vars.AZURE_ACR_NAME }}" \
+            --image "ai-olympics-web:${IMAGE_TAG}" \
+            -f Dockerfile.web \
+            .
+
+      - name: Build MCP image in ACR
+        run: |
+          az acr build \
+            --registry "${{ vars.AZURE_ACR_NAME }}" \
+            --image "ai-olympics-mcp:${IMAGE_TAG}" \
+            -f Dockerfile.mcp \
+            .
+
+      - name: Deploy web Container App
+        run: |
+          az containerapp update \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ vars.AZURE_WEB_APP }}" \
+            --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-web:${IMAGE_TAG}"
+
+      - name: Deploy MCP Container App
+        run: |
+          az containerapp update \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ vars.AZURE_MCP_APP }}" \
+            --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-mcp:${IMAGE_TAG}"
+
+      - name: Smoke check web
+        run: curl -fsS "${{ vars.PUBLIC_WEB_URL }}/api/games" > /dev/null
+
+      - name: Smoke check MCP
+        run: |
+          curl -fsS "${{ vars.PUBLIC_MCP_BASE_URL }}/healthz" > /dev/null
+          curl -fsS "${{ vars.PUBLIC_MCP_BASE_URL }}/.well-known/oauth-authorization-server" > /dev/null

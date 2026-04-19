@@ -5,6 +5,9 @@ import {
   applyTicTacToeMove,
   boardToAscii,
   createInitialTicTacToeState,
+  getLegalTicTacToeMoves,
+  parseTicTacToeMoveNotation,
+  renderTicTacToeBoard,
 } from "@/lib/tic-tac-toe";
 
 describe("tic tac toe engine", () => {
@@ -12,6 +15,7 @@ describe("tic tac toe engine", () => {
     const state = createInitialTicTacToeState();
 
     expect(boardToAscii(state.board)).toBe(". . .\n. . .\n. . .");
+    expect(renderTicTacToeBoard(state.board)).toBe("  0 1 2\n0 . . .\n1 . . .\n2 . . .");
   });
 
   it("detects a win on the top row", () => {
@@ -40,5 +44,24 @@ describe("tic tac toe engine", () => {
     expect(state.winner).toBe("O");
     expect(state.winnerReason).toBe("timeout");
     expect(state.winningLine).toBeNull();
+  });
+
+  it("parses center as an alias for 1,1", () => {
+    const move = parseTicTacToeMoveNotation("center", getLegalTicTacToeMoves(createInitialTicTacToeState()));
+
+    expect(move.notation).toBe("1,1");
+    expect(move.name).toBe("center");
+  });
+
+  it("exposes human-friendly square names alongside canonical notation", () => {
+    const move = getLegalTicTacToeMoves(createInitialTicTacToeState()).find(
+      (candidate) => candidate.notation === "0,1",
+    );
+
+    expect(move).toMatchObject({
+      notation: "0,1",
+      name: "top-center",
+    });
+    expect(move?.aliases).toContain("top middle");
   });
 });

@@ -20,6 +20,7 @@ import {
   OAUTH_AGENT_GRANT_TYPE,
   OAUTH_CODE_CHALLENGE_METHOD,
   OAUTH_CONNECTOR_GRANT_TYPE,
+  OAUTH_REFRESH_GRANT_TYPE,
   OAUTH_SCOPE,
 } from "@/lib/oauth";
 import {
@@ -27,7 +28,9 @@ import {
   authenticateOAuthAccessToken,
   exchangeOAuthAuthorizationCode,
   exchangeOAuthClientCredentials,
+  exchangeOAuthRefreshToken,
   getOAuthClientByClientId,
+  getOAuthClientRegistrationMetadata,
   issueOAuthAuthorizationCodeForAgent,
   registerOAuthDynamicClient,
 } from "@/lib/oauth-service";
@@ -35,14 +38,17 @@ import {
   ensureMatchTimeoutWorker,
   getCheckersMatchStateForAgent,
   getChessMatchStateForAgent,
+  getTicTacToeMatchStateForAgent,
   listMatchesForAgent,
   playCheckersTurn,
   playChessTurn,
   playTicTacToeTurn,
   queueAgentForGame,
   serializeMatchForMcp,
+  waitForTurnOrMatchEndForAgent,
 } from "@/lib/matches";
 import { getDisplayRating } from "@/lib/rating";
+import { TIC_TAC_TOE_RULES_TEXT } from "@/lib/tic-tac-toe";
 
 type AuthenticatedRequest = Request & {
   agent?: Awaited<ReturnType<typeof authenticateOAuthAccessToken>>;
@@ -53,6 +59,159 @@ void ensureOfficialAgents().catch((error) => {
 });
 
 ensureMatchTimeoutWorker();
+
+const matchSummarySchema = z.object({
+  id: z.string(),
+  gameKey: z.enum(GAME_KEYS),
+  status: z.string(),
+  result: z.string().nullable(),
+  currentTurnAgentId: z.string().nullable(),
+  currentTurnAgentName: z.string().nullable(),
+  isYourTurn: z.boolean().nullable(),
+  playerOne: z.string(),
+  playerTwo: z.string().nullable(),
+  winner: z.string().nullable(),
+  board: z.string(),
+  moveCount: z.number().int().nonnegative(),
+  updatedAt: z.string(),
+  turnDeadlineAt: z.string().nullable(),
+  secondsRemaining: z.number().int().nullable(),
+  moveTimeoutSeconds: z.number().int().positive(),
+});
+
+const joinQueueOutputSchema = {
+  status: z.enum(["waiting", "matched"]),
+  gameKey: z.enum(GAME_KEYS),
+  match: matchSummarySchema.nullable(),
+  recommendedTool: z.string().nullable(),
+};
+
+const myMatchesOutputSchema = {
+  matches: z.array(matchSummarySchema),
+};
+
+const ticTacToePositionSchema = z.object({
+  row: z.number().int().min(0).max(2),
+  column: z.number().int().min(0).max(2),
+});
+
+const ticTacToeLegalMoveSchema = z.object({
+  notation: z.string(),
+  row: z.number().int().min(0).max(2),
+  column: z.number().int().min(0).max(2),
+  name: z.string(),
+  aliases: z.array(z.string()),
+});
+
+const ticTacToeStateOutputSchema = {
+  matchId: z.string(),
+  gameKey: z.literal("tic-tac-toe"),
+  status: z.string(),
+  yourMark: z.enum(["X", "O"]),
+  opponentName: z.string(),
+  currentTurnAgentId: z.string().nullable(),
+  currentTurnAgentName: z.string().nullable(),
+  isYourTurn: z.boolean(),
+  board: z.string(),
+  legalMoves: z.array(ticTacToeLegalMoveSchema),
+  winner: z.enum(["X", "O", "DRAW"]).nullable(),
+  winnerReason: z.enum(["line", "draw", "timeout"]).nullable(),
+  turnCount: z.number().int().nonnegative(),
+  winningLine: z.array(ticTacToePositionSchema).nullable(),
+  turnDeadlineAt: z.string().nullable(),
+  secondsRemaining: z.number().int().nullable(),
+  moveTimeoutSeconds: z.number().int().positive(),
+  rules: z.string(),
+  recommendedTool: z.enum(["play_tic_tac_toe_move", "wait_for_turn_or_match_end"]),
+};
+
+const waitForTurnOutputSchema = {
+  match: matchSummarySchema,
+  timedOutWaiting: z.boolean(),
+};
+
+function toStructuredToolResult(structuredContent: Record<string, unknown>, text?: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: text ?? JSON.stringify(structuredContent, null, 2),
+      },
+    ],
+    structuredContent,
+  };
+}
+
+function getLegalMovesToolName(gameKey: string) {
+  switch (gameKey) {
+    case "tic-tac-toe":
+      return "get_tic_tac_toe_legal_moves";
+    case "checkers":
+      return "get_checkers_legal_moves";
+    case "chess":
+      return "get_chess_legal_moves";
+    default:
+      return null;
+  }
+}
+
+function serializeTicTacToeStateForTool(
+  state: Awaited<ReturnType<typeof getTicTacToeMatchStateForAgent>>,
+  agentId: string,
+) {
+  const opponentName =
+    state.match.playerOneId === agentId
+      ? state.match.playerTwo?.name ?? "unknown"
+      : state.match.playerOne.name;
+
+  return {
+    matchId: state.match.id,
+    gameKey: "tic-tac-toe" as const,
+    status: state.match.status,
+    yourMark: state.mark,
+    opponentName,
+    currentTurnAgentId: state.match.currentTurnAgentId,
+    currentTurnAgentName: state.currentTurnAgentName,
+    isYourTurn: state.isYourTurn,
+    board: state.board,
+    legalMoves: state.legalMoves.map((move) => ({
+      notation: move.notation,
+      row: move.row,
+      column: move.column,
+      name: move.name,
+      aliases: move.aliases,
+    })),
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    turnCount: state.turnCount,
+    winningLine: state.winningLine
+      ? state.winningLine.map(([row, column]) => ({ row, column }))
+      : null,
+    turnDeadlineAt: state.turnDeadlineAt,
+    secondsRemaining: state.secondsRemaining,
+    moveTimeoutSeconds: state.moveTimeoutSeconds,
+    rules: TIC_TAC_TOE_RULES_TEXT,
+    recommendedTool: state.isYourTurn
+      ? ("play_tic_tac_toe_move" as const)
+      : ("wait_for_turn_or_match_end" as const),
+  };
+}
+
+function formatTicTacToeStateText(payload: ReturnType<typeof serializeTicTacToeStateForTool>) {
+  const nextStep = payload.isYourTurn
+    ? "Your turn. Call play_tic_tac_toe_move with one legal move notation."
+    : "Not your turn. Call wait_for_turn_or_match_end to block until your turn or match end.";
+
+  return [
+    `Match ${payload.matchId}`,
+    `${payload.yourMark} vs ${payload.opponentName}`,
+    payload.board,
+    `Legal moves: ${payload.legalMoves.map((move) => move.notation).join(", ") || "none"}`,
+    `Seconds remaining on current turn: ${payload.secondsRemaining ?? "n/a"}`,
+    `Winner: ${payload.winner ?? "pending"}`,
+    nextStep,
+  ].join("\n");
+}
 
 function getServer(agent: NonNullable<AuthenticatedRequest["agent"]>) {
   const server = new McpServer(
@@ -117,60 +276,127 @@ function getServer(agent: NonNullable<AuthenticatedRequest["agent"]>) {
   server.registerTool(
     "join_queue",
     {
-      description: "Queue the authenticated agent for a live ranked game.",
+      description:
+        "Queue the authenticated agent for a live ranked game. If a match is assigned, immediately call the game-specific legal-moves tool. To play a full live game, if it is not your turn, call wait_for_turn_or_match_end instead of manually polling.",
       inputSchema: {
         gameKey: z.enum(GAME_KEYS),
       },
+      outputSchema: joinQueueOutputSchema,
     },
     async ({ gameKey }) => {
       const result = await queueAgentForGame(agent.id, gameKey);
 
       if (result.status === "waiting") {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `${agent.name} is now waiting in the ${gameKey} queue.`,
-            },
-          ],
+        const payload = {
+          status: "waiting" as const,
+          gameKey,
+          match: null,
+          recommendedTool: null,
         };
+
+        return toStructuredToolResult(
+          payload,
+          `${agent.name} is now waiting in the ${gameKey} queue.`,
+        );
       }
 
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `Match ready: ${result.match.id}\n` +
-              `${formatMatchupLine(
-                result.match.gameKey,
-                result.match.playerOne.name,
-                result.match.playerTwo?.name ?? "unknown",
-              )}\n` +
-              `${result.board}`,
-          },
-        ],
+      const recommendedTool = getLegalMovesToolName(result.match.gameKey);
+      const payload = {
+        status: "matched" as const,
+        gameKey,
+        match: serializeMatchForMcp(result.match, agent.id),
+        recommendedTool,
       };
+
+      return toStructuredToolResult(
+        payload,
+        `Match ready: ${result.match.id}\n` +
+          `${formatMatchupLine(
+            result.match.gameKey,
+            result.match.playerOne.name,
+            result.match.playerTwo?.name ?? "unknown",
+          )}\n` +
+          `${result.board}\n` +
+          (recommendedTool
+            ? `Next step: call ${recommendedTool}. If it is not your turn, call wait_for_turn_or_match_end.`
+            : "Next step: inspect the assigned match."),
+      );
     },
   );
 
   server.registerTool(
     "my_matches",
     {
-      description: "List the authenticated agent's recent matches.",
+      description:
+        "List the authenticated agent's recent matches with turn state and move timer details. For active play, prefer wait_for_turn_or_match_end plus the game-specific legal-moves tool.",
+      outputSchema: myMatchesOutputSchema,
     },
     async () => {
       const matches = await listMatchesForAgent(agent.id);
-      const formatted = matches.map(serializeMatchForMcp);
+      const formatted = matches.map((match) => serializeMatchForMcp(match, agent.id));
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: formatted.length === 0 ? "No matches found." : JSON.stringify(formatted, null, 2),
-          },
-        ],
+      return toStructuredToolResult(
+        { matches: formatted },
+        formatted.length === 0 ? "No matches found." : JSON.stringify(formatted, null, 2),
+      );
+    },
+  );
+
+  server.registerTool(
+    "wait_for_turn_or_match_end",
+    {
+      description:
+        "Block on a live match until it becomes your turn, the match finishes, or the wait window expires. Use this instead of manual polling so you do not miss the 30-second move deadline.",
+      inputSchema: {
+        matchId: z.string().trim().min(1).describe("The active match to watch."),
+        maxWaitSeconds: z
+          .number()
+          .int()
+          .min(1)
+          .max(120)
+          .optional()
+          .describe("Maximum number of seconds to wait before returning even if the match is unchanged."),
+      },
+      outputSchema: waitForTurnOutputSchema,
+    },
+    async ({ matchId, maxWaitSeconds }) => {
+      const result = await waitForTurnOrMatchEndForAgent({
+        agentId: agent.id,
+        matchId,
+        maxWaitSeconds,
+      });
+      const payload = {
+        match: serializeMatchForMcp(result.match, agent.id),
+        timedOutWaiting: result.timedOutWaiting,
       };
+
+      return toStructuredToolResult(
+        payload,
+        result.timedOutWaiting
+          ? `Wait window elapsed for match ${result.match.id}.`
+          : `Match ${result.match.id} changed state.`,
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_tic_tac_toe_legal_moves",
+    {
+      description:
+        "Return the current Tic Tac Toe board, legal moves, move timer, and turn state for the authenticated agent. Tic Tac Toe uses zero-based row,column notation from top-left 0,0 to bottom-right 2,2. Common square names like center and top-left are also accepted.",
+      inputSchema: {
+        matchId: z.string().trim().min(1).describe("The live Tic Tac Toe match to inspect."),
+      },
+      outputSchema: ticTacToeStateOutputSchema,
+    },
+    async ({ matchId }) => {
+      const state = await getTicTacToeMatchStateForAgent({
+        agentId: agent.id,
+        matchId,
+      });
+      const payload = serializeTicTacToeStateForTool(state, agent.id);
+
+      return toStructuredToolResult(payload, formatTicTacToeStateText(payload));
     },
   );
 
@@ -343,30 +569,31 @@ function getServer(agent: NonNullable<AuthenticatedRequest["agent"]>) {
   server.registerTool(
     "play_tic_tac_toe_move",
     {
-      description: "Play a single Tic Tac Toe move using the exact legal move notation, for example '1,2'.",
+      description:
+        "Play one Tic Tac Toe move. Before calling this tool, first call get_tic_tac_toe_legal_moves and use one of its legalMoves[].notation values such as '1,1'. Common square names like 'center' and 'top-left' are also accepted. To finish a full game, alternate between get_tic_tac_toe_legal_moves and wait_for_turn_or_match_end until the match is finished.",
       inputSchema: {
-        matchId: z.string().min(1),
-        notation: z.string().trim().min(1),
+        matchId: z.string().trim().min(1).describe("The live Tic Tac Toe match to play in."),
+        notation: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("A legal Tic Tac Toe move notation from get_tic_tac_toe_legal_moves, such as '1,1' or 'center'."),
       },
+      outputSchema: ticTacToeStateOutputSchema,
     },
     async ({ matchId, notation }) => {
-      const result = await playTicTacToeTurn({
+      await playTicTacToeTurn({
         agentId: agent.id,
         matchId,
         notation,
       });
+      const state = await getTicTacToeMatchStateForAgent({
+        agentId: agent.id,
+        matchId,
+      });
+      const payload = serializeTicTacToeStateForTool(state, agent.id);
 
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `Match ${result.match.id}\n` +
-              `${result.board}\n` +
-              `Winner: ${result.winner ?? "pending"}`,
-          },
-        ],
-      };
+      return toStructuredToolResult(payload, formatTicTacToeStateText(payload));
     },
   );
 
@@ -392,8 +619,8 @@ app.use(express.urlencoded({ extended: false }));
 const dynamicClientRegistrationSchema = z.object({
   client_name: z.string().trim().min(1).max(120).optional(),
   redirect_uris: z.array(z.string().trim().url()).min(1),
-  grant_types: z.array(z.literal(OAUTH_CONNECTOR_GRANT_TYPE)).optional(),
-  response_types: z.array(z.literal("code")).optional(),
+  grant_types: z.array(z.string().trim()).optional(),
+  response_types: z.array(z.string().trim()).optional(),
   token_endpoint_auth_method: z.literal("none").optional(),
   scope: z.string().trim().optional(),
 });
@@ -434,7 +661,11 @@ app.get("/.well-known/oauth-authorization-server", (_req, res) => {
     authorization_endpoint: getOAuthAuthorizationEndpointUrl(),
     token_endpoint: getOAuthTokenEndpointUrl(),
     registration_endpoint: getOAuthRegistrationEndpointUrl(),
-    grant_types_supported: [OAUTH_CONNECTOR_GRANT_TYPE, OAUTH_AGENT_GRANT_TYPE],
+    grant_types_supported: [
+      OAUTH_CONNECTOR_GRANT_TYPE,
+      OAUTH_REFRESH_GRANT_TYPE,
+      OAUTH_AGENT_GRANT_TYPE,
+    ],
     token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
     response_types_supported: ["code"],
     code_challenge_methods_supported: [OAUTH_CODE_CHALLENGE_METHOD],
@@ -443,6 +674,7 @@ app.get("/.well-known/oauth-authorization-server", (_req, res) => {
 });
 
 app.post("/register", async (req, res) => {
+  const rawBody = getObjectRecord(req.body);
   const parsed = dynamicClientRegistrationSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -457,19 +689,15 @@ app.post("/register", async (req, res) => {
     const oauthClient = await registerOAuthDynamicClient({
       clientName: parsed.data.client_name,
       redirectUris: parsed.data.redirect_uris,
+      grantTypes: parsed.data.grant_types,
+      responseTypes: parsed.data.response_types,
       scope: parsed.data.scope,
+      metadata: rawBody,
     });
 
-    res.status(201).json({
-      client_id: oauthClient.clientId,
-      client_id_issued_at: Math.floor(oauthClient.createdAt.getTime() / 1000),
-      client_name: oauthClient.displayName,
-      redirect_uris: oauthClient.redirectUris,
-      grant_types: oauthClient.grantTypes,
-      response_types: oauthClient.responseTypes,
-      token_endpoint_auth_method: "none",
-      scope: oauthClient.scope,
-    });
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Pragma", "no-cache");
+    res.status(201).json(getOAuthClientRegistrationMetadata(oauthClient));
   } catch (error) {
     res.status(400).json({
       error: "invalid_client_metadata",
@@ -700,6 +928,41 @@ app.post("/token", async (req, res) => {
         expires_in: tokenResponse.expiresIn,
         scope: tokenResponse.scope,
         resource: getOAuthResourceUri(),
+        refresh_token: tokenResponse.refreshToken,
+      });
+      return;
+    }
+
+    if (body.grant_type === OAUTH_REFRESH_GRANT_TYPE) {
+      if (!body.client_id) {
+        res.status(401).json({
+          error: "invalid_client",
+          error_description: "Missing public OAuth client_id.",
+        });
+        return;
+      }
+
+      if (!body.refresh_token) {
+        res.status(400).json({
+          error: "invalid_request",
+          error_description: "Missing refresh_token.",
+        });
+        return;
+      }
+
+      const tokenResponse = await exchangeOAuthRefreshToken({
+        clientId: body.client_id,
+        refreshToken: body.refresh_token,
+        resource: body.resource,
+      });
+
+      res.json({
+        access_token: tokenResponse.accessToken,
+        token_type: tokenResponse.tokenType,
+        expires_in: tokenResponse.expiresIn,
+        scope: tokenResponse.scope,
+        resource: getOAuthResourceUri(),
+        refresh_token: tokenResponse.refreshToken,
       });
       return;
     }
@@ -707,7 +970,7 @@ app.post("/token", async (req, res) => {
     res.status(400).json({
       error: "unsupported_grant_type",
       error_description:
-        `Supported grant types are ${OAUTH_CONNECTOR_GRANT_TYPE} and ${OAUTH_AGENT_GRANT_TYPE}.`,
+        `Supported grant types are ${OAUTH_CONNECTOR_GRANT_TYPE}, ${OAUTH_REFRESH_GRANT_TYPE}, and ${OAUTH_AGENT_GRANT_TYPE}.`,
     });
   } catch (error) {
     res.status(400).json({
@@ -829,6 +1092,14 @@ function setOAuthChallenge(res: Response, errorCode?: string) {
 
 function getTokenRequestBody(req: Request) {
   return getStringRecord(req.body);
+}
+
+function getObjectRecord(rawValue: unknown) {
+  if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
+    return {} as Record<string, unknown>;
+  }
+
+  return rawValue as Record<string, unknown>;
 }
 
 function getConfidentialOAuthClientCredentials(

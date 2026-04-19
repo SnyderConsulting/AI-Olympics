@@ -6,13 +6,17 @@ import {
   issueOAuthAccessToken,
   issueOAuthAuthorizationCode,
   issueOAuthPublicClient,
+  issueOAuthRefreshToken,
   OAUTH_AGENT_GRANT_TYPE,
   OAUTH_CODE_CHALLENGE_METHOD,
   OAUTH_CONNECTOR_GRANT_TYPE,
+  OAUTH_REFRESH_GRANT_TYPE,
   OAUTH_SCOPE,
   verifyOAuthSecret,
   verifyPkceCodeVerifier,
 } from "@/lib/oauth";
+
+type DynamicClientMetadata = Record<string, unknown>;
 
 function normalizeRequestedScope(scope: string | null | undefined) {
   return scope?.trim() || OAUTH_SCOPE;
@@ -20,6 +24,119 @@ function normalizeRequestedScope(scope: string | null | undefined) {
 
 function normalizeRequestedResource(resource: string | null | undefined) {
   return resource?.trim() || getOAuthResourceUri();
+}
+
+function normalizeGrantTypes(grantTypes: string[] | null | undefined) {
+  const normalized = grantTypes?.length ? [...new Set(grantTypes)] : [OAUTH_CONNECTOR_GRANT_TYPE];
+
+  for (const grantType of normalized) {
+    if (![OAUTH_CONNECTOR_GRANT_TYPE, OAUTH_REFRESH_GRANT_TYPE].includes(grantType)) {
+      throw new Error(`Unsupported grant type "${grantType}".`);
+    }
+  }
+
+  if (!normalized.includes(OAUTH_CONNECTOR_GRANT_TYPE)) {
+    throw new Error(`Dynamic clients must include ${OAUTH_CONNECTOR_GRANT_TYPE}.`);
+  }
+
+  return normalized;
+}
+
+function normalizeResponseTypes(responseTypes: string[] | null | undefined) {
+  const normalized = responseTypes?.length ? [...new Set(responseTypes)] : ["code"];
+
+  for (const responseType of normalized) {
+    if (responseType !== "code") {
+      throw new Error(`Unsupported response type "${responseType}".`);
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeDynamicClientMetadata(
+  metadata: DynamicClientMetadata | null | undefined,
+  args: {
+    clientName?: string | null;
+    redirectUris: string[];
+    scope: string;
+    grantTypes: string[];
+    responseTypes: string[];
+    tokenEndpointAuthMethod: "none";
+  },
+) {
+  return {
+    ...(metadata ?? {}),
+    client_name: args.clientName?.trim() || "ChatGPT connector client",
+    redirect_uris: args.redirectUris,
+    scope: args.scope,
+    grant_types: args.grantTypes,
+    response_types: args.responseTypes,
+    token_endpoint_auth_method: args.tokenEndpointAuthMethod,
+  };
+}
+
+function parseOAuthClientMetadataJson(metadataJson: string | null) {
+  if (!metadataJson) {
+    return {} as DynamicClientMetadata;
+  }
+
+  try {
+    const parsed = JSON.parse(metadataJson) as DynamicClientMetadata;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function buildAccessTokenResponse(args: {
+  accessToken: string;
+  expiresAt: Date;
+  refreshToken?: string;
+  refreshTokenExpiresAt?: Date;
+}) {
+  return {
+    accessToken: args.accessToken,
+    expiresIn: Math.max(1, Math.floor((args.expiresAt.getTime() - Date.now()) / 1000)),
+    refreshToken: args.refreshToken,
+    refreshTokenExpiresIn: args.refreshTokenExpiresAt
+      ? Math.max(1, Math.floor((args.refreshTokenExpiresAt.getTime() - Date.now()) / 1000))
+      : undefined,
+    scope: OAUTH_SCOPE,
+    tokenType: "Bearer" as const,
+  };
+}
+
+function createAccessTokenCreateInput(args: {
+  tokenHash: string;
+  expiresAt: Date;
+  oauthClientId: string;
+  agentId: string;
+}) {
+  return {
+    tokenHash: args.tokenHash,
+    scope: OAUTH_SCOPE,
+    audience: getOAuthResourceUri(),
+    expiresAt: args.expiresAt,
+    oauthClientId: args.oauthClientId,
+    agentId: args.agentId,
+  };
+}
+
+function createRefreshTokenCreateInput(args: {
+  tokenHash: string;
+  expiresAt: Date;
+  oauthClientId: string;
+  agentId: string;
+}) {
+  return {
+    tokenHash: args.tokenHash,
+    scope: OAUTH_SCOPE,
+    audience: getOAuthResourceUri(),
+    expiresAt: args.expiresAt,
+    oauthClientId: args.oauthClientId,
+    agentId: args.agentId,
+  };
 }
 
 export async function authenticateAgentOAuthClientCredentials(args: {
@@ -76,13 +193,27 @@ export async function getOAuthClientByClientId(clientId: string) {
 export async function registerOAuthDynamicClient(args: {
   clientName?: string | null;
   redirectUris: string[];
+  grantTypes?: string[] | null;
+  responseTypes?: string[] | null;
   scope?: string | null;
+  metadata?: DynamicClientMetadata;
 }) {
   const requestedScope = normalizeRequestedScope(args.scope);
+  const requestedGrantTypes = normalizeGrantTypes(args.grantTypes);
+  const requestedResponseTypes = normalizeResponseTypes(args.responseTypes);
 
   if (requestedScope !== OAUTH_SCOPE) {
     throw new Error(`Unsupported scope. Use "${OAUTH_SCOPE}".`);
   }
+
+  const metadata = normalizeDynamicClientMetadata(args.metadata, {
+    clientName: args.clientName,
+    redirectUris: args.redirectUris,
+    scope: requestedScope,
+    grantTypes: requestedGrantTypes,
+    responseTypes: requestedResponseTypes,
+    tokenEndpointAuthMethod: "none",
+  });
 
   const issued = issueOAuthPublicClient();
   const client = await db.oAuthClient.create({
@@ -91,10 +222,11 @@ export async function registerOAuthDynamicClient(args: {
       clientType: OAuthClientType.PUBLIC,
       tokenEndpointAuthMethod: OAuthTokenEndpointAuthMethod.NONE,
       displayName: args.clientName?.trim() || "ChatGPT connector client",
-      scope: OAUTH_SCOPE,
+      scope: requestedScope,
       redirectUris: args.redirectUris,
-      grantTypes: [OAUTH_CONNECTOR_GRANT_TYPE],
-      responseTypes: ["code"],
+      grantTypes: requestedGrantTypes,
+      responseTypes: requestedResponseTypes,
+      metadataJson: JSON.stringify(metadata),
     },
   });
 
@@ -201,21 +333,19 @@ export async function exchangeOAuthClientCredentials(args: {
   await revokeExpiredOAuthArtifacts();
 
   await db.oAuthAccessToken.create({
-    data: {
+    data: createAccessTokenCreateInput({
       tokenHash: issued.tokenHash,
-      scope: OAUTH_SCOPE,
-      audience: getOAuthResourceUri(),
       expiresAt: issued.expiresAt,
       oauthClientId: oauthClient.id,
       agentId: oauthClient.agent.id,
-    },
+    }),
   });
 
   return {
-    accessToken: issued.accessToken,
-    expiresIn: Math.max(1, Math.floor((issued.expiresAt.getTime() - Date.now()) / 1000)),
-    scope: OAUTH_SCOPE,
-    tokenType: "Bearer" as const,
+    ...buildAccessTokenResponse({
+      accessToken: issued.accessToken,
+      expiresAt: issued.expiresAt,
+    }),
     agent: oauthClient.agent,
   };
 }
@@ -289,10 +419,13 @@ export async function exchangeOAuthAuthorizationCode(args: {
     throw new Error("Invalid PKCE code verifier.");
   }
 
-  const issued = issueOAuthAccessToken();
+  const issuedAccessToken = issueOAuthAccessToken();
+  const issuedRefreshToken = oauthClient.grantTypes.includes(OAUTH_REFRESH_GRANT_TYPE)
+    ? issueOAuthRefreshToken()
+    : null;
   await revokeExpiredOAuthArtifacts(now);
 
-  await db.$transaction([
+  const operations = [
     db.oAuthAuthorizationCode.update({
       where: {
         id: authorizationCode.id,
@@ -310,23 +443,133 @@ export async function exchangeOAuthAuthorizationCode(args: {
       },
     }),
     db.oAuthAccessToken.create({
-      data: {
-        tokenHash: issued.tokenHash,
-        scope: OAUTH_SCOPE,
-        audience: getOAuthResourceUri(),
-        expiresAt: issued.expiresAt,
+      data: createAccessTokenCreateInput({
+        tokenHash: issuedAccessToken.tokenHash,
+        expiresAt: issuedAccessToken.expiresAt,
         oauthClientId: oauthClient.id,
         agentId: authorizationCode.agent.id,
+      }),
+    }),
+  ];
+
+  if (issuedRefreshToken) {
+    operations.push(
+      db.oAuthRefreshToken.create({
+        data: createRefreshTokenCreateInput({
+          tokenHash: issuedRefreshToken.tokenHash,
+          expiresAt: issuedRefreshToken.expiresAt,
+          oauthClientId: oauthClient.id,
+          agentId: authorizationCode.agent.id,
+        }),
+      }),
+    );
+  }
+
+  await db.$transaction(operations);
+
+  return {
+    ...buildAccessTokenResponse({
+      accessToken: issuedAccessToken.accessToken,
+      expiresAt: issuedAccessToken.expiresAt,
+      refreshToken: issuedRefreshToken?.refreshToken,
+      refreshTokenExpiresAt: issuedRefreshToken?.expiresAt,
+    }),
+    agent: authorizationCode.agent,
+  };
+}
+
+export async function exchangeOAuthRefreshToken(args: {
+  clientId: string;
+  refreshToken: string;
+  resource?: string | null;
+}) {
+  const requestedResource = normalizeRequestedResource(args.resource);
+
+  if (requestedResource !== getOAuthResourceUri()) {
+    throw new Error("Unsupported resource indicator for this MCP server.");
+  }
+
+  const tokenHash = hashOAuthValue(args.refreshToken);
+  const now = new Date();
+  const storedRefreshToken = await db.oAuthRefreshToken.findFirst({
+    where: {
+      tokenHash,
+      revokedAt: null,
+      expiresAt: {
+        gt: now,
       },
+      audience: getOAuthResourceUri(),
+      oauthClient: {
+        clientId: args.clientId,
+        clientType: OAuthClientType.PUBLIC,
+        revokedAt: null,
+        grantTypes: {
+          has: OAUTH_REFRESH_GRANT_TYPE,
+        },
+      },
+    },
+    include: {
+      agent: {
+        include: {
+          ratings: true,
+        },
+      },
+      oauthClient: true,
+    },
+  });
+
+  if (!storedRefreshToken) {
+    throw new Error("Invalid or expired refresh token.");
+  }
+
+  const issuedAccessToken = issueOAuthAccessToken();
+  const rotatedRefreshToken = issueOAuthRefreshToken();
+
+  await revokeExpiredOAuthArtifacts(now);
+  await db.$transaction([
+    db.oAuthRefreshToken.update({
+      where: {
+        id: storedRefreshToken.id,
+      },
+      data: {
+        revokedAt: now,
+        lastUsedAt: now,
+      },
+    }),
+    db.oAuthClient.update({
+      where: {
+        id: storedRefreshToken.oauthClientId,
+      },
+      data: {
+        lastUsedAt: now,
+      },
+    }),
+    db.oAuthAccessToken.create({
+      data: createAccessTokenCreateInput({
+        tokenHash: issuedAccessToken.tokenHash,
+        expiresAt: issuedAccessToken.expiresAt,
+        oauthClientId: storedRefreshToken.oauthClientId,
+        agentId: storedRefreshToken.agent.id,
+      }),
+    }),
+    db.oAuthRefreshToken.create({
+      data: createRefreshTokenCreateInput({
+        tokenHash: rotatedRefreshToken.tokenHash,
+        expiresAt: rotatedRefreshToken.expiresAt,
+        oauthClientId: storedRefreshToken.oauthClientId,
+        agentId: storedRefreshToken.agent.id,
+      }),
     }),
   ]);
 
   return {
-    accessToken: issued.accessToken,
-    expiresIn: Math.max(1, Math.floor((issued.expiresAt.getTime() - Date.now()) / 1000)),
-    scope: OAUTH_SCOPE,
-    tokenType: "Bearer" as const,
-    agent: authorizationCode.agent,
+    ...buildAccessTokenResponse({
+      accessToken: issuedAccessToken.accessToken,
+      expiresAt: issuedAccessToken.expiresAt,
+      refreshToken: rotatedRefreshToken.refreshToken,
+      refreshTokenExpiresAt: rotatedRefreshToken.expiresAt,
+    }),
+    agent: storedRefreshToken.agent,
   };
 }
 
@@ -421,5 +664,33 @@ export async function revokeExpiredOAuthArtifacts(referenceDate = new Date()) {
         ],
       },
     }),
+    db.oAuthRefreshToken.deleteMany({
+      where: {
+        OR: [
+          {
+            expiresAt: {
+              lte: referenceDate,
+            },
+          },
+          {
+            revokedAt: {
+              not: null,
+            },
+          },
+        ],
+      },
+    }),
   ]);
+}
+
+export function getOAuthClientRegistrationMetadata(oauthClient: {
+  clientId: string;
+  createdAt: Date;
+  metadataJson: string | null;
+}) {
+  return {
+    client_id: oauthClient.clientId,
+    client_id_issued_at: Math.floor(oauthClient.createdAt.getTime() / 1000),
+    ...parseOAuthClientMetadataJson(oauthClient.metadataJson),
+  };
 }

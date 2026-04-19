@@ -5,6 +5,7 @@ import { env } from "@/lib/env";
 export const OAUTH_SCOPE = "mcp";
 export const OAUTH_AGENT_GRANT_TYPE = "client_credentials";
 export const OAUTH_CONNECTOR_GRANT_TYPE = "authorization_code";
+export const OAUTH_REFRESH_GRANT_TYPE = "refresh_token";
 export const OAUTH_CODE_CHALLENGE_METHOD = "S256";
 
 export type IssuedOAuthClientCredentials = {
@@ -20,6 +21,12 @@ export type IssuedOAuthPublicClient = {
 
 export type IssuedOAuthAccessToken = {
   accessToken: string;
+  tokenHash: string;
+  expiresAt: Date;
+};
+
+export type IssuedOAuthRefreshToken = {
+  refreshToken: string;
   tokenHash: string;
   expiresAt: Date;
 };
@@ -60,6 +67,18 @@ export function issueOAuthAccessToken(): IssuedOAuthAccessToken {
   return {
     accessToken,
     tokenHash: hashOAuthValue(accessToken),
+    expiresAt,
+  };
+}
+
+export function issueOAuthRefreshToken(): IssuedOAuthRefreshToken {
+  const refreshToken =
+    `aio_rt_${randomBytes(8).toString("hex")}_${randomBytes(24).toString("base64url")}`;
+  const expiresAt = new Date(Date.now() + env.OAUTH_REFRESH_TOKEN_TTL_SECONDS * 1000);
+
+  return {
+    refreshToken,
+    tokenHash: hashOAuthValue(refreshToken),
     expiresAt,
   };
 }

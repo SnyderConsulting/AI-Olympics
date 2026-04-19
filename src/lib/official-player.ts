@@ -39,7 +39,7 @@ export async function chooseOfficialTicTacToeMove(args: {
     provider: args.provider,
     modelId: args.modelId,
     systemPrompt:
-      `Play Tic Tac Toe as ${args.mark}. ` +
+      `Play Tic Tac Toe as ${args.mark}. You are on a 3x3 board and must make three in a row horizontally, vertically, or diagonally before the opponent does. ` +
       "Return only a JSON object matching the provided schema with a single legal move notation.",
     userPrompt:
       `Board:\n${compactPromptBoard(args.board)}\n\n` +

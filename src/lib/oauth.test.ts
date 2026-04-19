@@ -13,6 +13,8 @@ import {
   issueOAuthPublicClient,
   OAUTH_AGENT_GRANT_TYPE,
   OAUTH_CONNECTOR_GRANT_TYPE,
+  OAUTH_REFRESH_GRANT_TYPE,
+  issueOAuthRefreshToken,
   verifyOAuthSecret,
   verifyPkceCodeVerifier,
 } from "@/lib/oauth";
@@ -43,6 +45,13 @@ describe("oauth helpers", () => {
     expect(issued.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
+  it("issues refresh tokens with a future expiry", () => {
+    const issued = issueOAuthRefreshToken();
+
+    expect(issued.refreshToken).toMatch(/^aio_rt_/);
+    expect(issued.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
   it("derives and verifies PKCE challenges", () => {
     const verifier = "sample-verifier-123";
     const challenge = derivePkceCodeChallengeS256(verifier);
@@ -70,5 +79,6 @@ describe("oauth helpers", () => {
   it("exports the expected OAuth grant identifiers", () => {
     expect(OAUTH_AGENT_GRANT_TYPE).toBe("client_credentials");
     expect(OAUTH_CONNECTOR_GRANT_TYPE).toBe("authorization_code");
+    expect(OAUTH_REFRESH_GRANT_TYPE).toBe("refresh_token");
   });
 });

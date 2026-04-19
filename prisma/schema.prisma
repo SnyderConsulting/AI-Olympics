@@ -63,6 +63,7 @@ model Agent {
   oauthClients         OAuthClient[]
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthAccessTokens    OAuthAccessToken[]
+  oauthRefreshTokens   OAuthRefreshToken[]
   queueEntries         QueueEntry[]
   ratings              Rating[]
   moves                MatchMove[]
@@ -86,6 +87,7 @@ model OAuthClient {
   redirectUris            String[]                      @default([])
   grantTypes              String[]                      @default([])
   responseTypes           String[]                      @default([])
+  metadataJson            String?
   lastUsedAt              DateTime?
   revokedAt               DateTime?
   createdAt               DateTime                      @default(now())
@@ -94,6 +96,7 @@ model OAuthClient {
   agent                   Agent?                        @relation(fields: [agentId], references: [id], onDelete: Cascade)
   authorizationCodes      OAuthAuthorizationCode[]
   accessTokens            OAuthAccessToken[]
+  refreshTokens           OAuthRefreshToken[]
 
   @@index([agentId])
 }
@@ -120,6 +123,24 @@ model OAuthAuthorizationCode {
 }
 
 model OAuthAccessToken {
+  id            String      @id @default(cuid())
+  tokenHash     String      @unique
+  scope         String
+  audience      String
+  expiresAt     DateTime
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime    @default(now())
+  oauthClientId String
+  agentId       String
+  oauthClient   OAuthClient @relation(fields: [oauthClientId], references: [id], onDelete: Cascade)
+  agent         Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, expiresAt])
+  @@index([oauthClientId, expiresAt])
+}
+
+model OAuthRefreshToken {
   id            String      @id @default(cuid())
   tokenHash     String      @unique
   scope         String

@@ -1,4 +1,4 @@
-import { parseMoveNotation } from "@/lib/move-notation";
+import { normalizeMoveNotation, parseMoveNotation } from "@/lib/move-notation";
 
 export type TicTacToeMark = "X" | "O";
 export type TicTacToeWinner = TicTacToeMark | "DRAW";
@@ -9,6 +9,8 @@ export type TicTacToeMove = {
   row: number;
   column: number;
   notation: string;
+  name: string;
+  aliases: string[];
 };
 
 export type TicTacToeState = {
@@ -63,6 +65,33 @@ const WIN_LINES: [number, number][][] = [
   ],
 ];
 
+const MOVE_NAMES = [
+  ["top-left", "top-center", "top-right"],
+  ["middle-left", "center", "middle-right"],
+  ["bottom-left", "bottom-center", "bottom-right"],
+] as const;
+
+const MOVE_ALIASES = [
+  [
+    ["upper-left", "top left"],
+    ["top-middle", "top middle", "upper-middle", "upper center", "top center"],
+    ["upper-right", "top right"],
+  ],
+  [
+    ["center-left", "middle left", "left-middle"],
+    ["middle", "middle-center", "middle center", "center-center", "center center"],
+    ["center-right", "middle right", "right-middle"],
+  ],
+  [
+    ["lower-left", "bottom left"],
+    ["bottom-middle", "bottom middle", "lower-middle", "lower center", "bottom center"],
+    ["lower-right", "bottom right"],
+  ],
+] as const;
+
+export const TIC_TAC_TOE_RULES_TEXT =
+  "Tic Tac Toe is played on a 3x3 grid. X moves first, O moves second, and the first side to make three in a row horizontally, vertically, or diagonally wins. If all nine squares are filled without a line, the game is a draw. Squares use zero-based row,column coordinates from top-left 0,0 to bottom-right 2,2.";
+
 export function createInitialTicTacToeState(): TicTacToeState {
   return {
     board: Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => null)),
@@ -109,6 +138,14 @@ export function boardToAscii(board: TicTacToeBoard): string {
     .join("\n");
 }
 
+export function renderTicTacToeBoard(board: TicTacToeBoard): string {
+  const rows = board.map((row, rowIndex) => {
+    return `${rowIndex} ${row.map((cell) => cell ?? ".").join(" ")}`;
+  });
+
+  return `  0 1 2\n${rows.join("\n")}`;
+}
+
 export function getLegalTicTacToeMoves(state: TicTacToeState): TicTacToeMove[] {
   if (state.winner) {
     return [];
@@ -126,6 +163,8 @@ export function getLegalTicTacToeMoves(state: TicTacToeState): TicTacToeMove[] {
         row,
         column,
         notation: `${row},${column}`,
+        name: MOVE_NAMES[row][column],
+        aliases: MOVE_ALIASES[row][column] ? [...MOVE_ALIASES[row][column]] : [],
       });
     }
   }
@@ -137,6 +176,12 @@ export function parseTicTacToeMoveNotation(
   notation: string,
   legalMoves: readonly TicTacToeMove[],
 ) {
+  const aliasMatch = findAliasMatch(notation, legalMoves);
+
+  if (aliasMatch) {
+    return aliasMatch;
+  }
+
   return parseMoveNotation(notation, legalMoves);
 }
 
@@ -205,6 +250,28 @@ function getWinner(board: TicTacToeBoard): { mark: TicTacToeMark; line: [number,
         line,
       };
     }
+  }
+
+  return null;
+}
+
+function findAliasMatch(raw: string, legalMoves: readonly TicTacToeMove[]) {
+  const normalizedRaw = normalizeMoveNotation(raw);
+
+  if (!normalizedRaw) {
+    return null;
+  }
+
+  const matches = legalMoves.filter((move) =>
+    [move.name, ...move.aliases].some((alias) => normalizeMoveNotation(alias) === normalizedRaw),
+  );
+
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous Tic Tac Toe move alias: ${raw}`);
   }
 
   return null;
