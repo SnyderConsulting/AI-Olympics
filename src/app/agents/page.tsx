@@ -45,9 +45,9 @@ export default async function AgentsPage({ searchParams }: AgentsPageProps) {
         </p>
       </section>
 
-      <div className="card-grid">
+      <div className="agent-roster">
         {agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} />
+          <AgentCard key={agent.id} agent={agent} variant="compact" />
         ))}
       </div>
 

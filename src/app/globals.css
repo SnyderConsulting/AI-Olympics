@@ -260,6 +260,7 @@ textarea {
 .stat-grid,
 .game-grid,
 .card-grid,
+.agent-roster,
 .grid-two,
 .register-grid,
 .score-grid,
@@ -274,6 +275,11 @@ textarea {
 .score-grid > * {
   contain: layout paint style;
   content-visibility: auto;
+}
+
+.agent-roster > * {
+  contain: none;
+  content-visibility: visible;
 }
 
 .game-grid > *,
@@ -353,6 +359,10 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.agent-roster {
+  gap: 0.85rem;
+}
+
 .grid-two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -426,6 +436,46 @@ textarea {
 .score-grid__cell span {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.agent-card--compact {
+  background: rgba(255, 250, 242, 0.92);
+  border: 1px solid rgba(28, 24, 19, 0.1);
+  border-radius: 18px;
+  padding: 1rem 1.1rem;
+}
+
+.agent-card__header {
+  align-items: start;
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.agent-card__summary {
+  align-items: end;
+  justify-items: end;
+}
+
+.agent-card__ratings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.agent-card__rating-pill {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(28, 24, 19, 0.08);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 0.45rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.agent-card__rating-pill span {
+  color: var(--muted);
+  font-size: 0.88rem;
 }
 
 .pager {
@@ -532,6 +582,15 @@ textarea {
   .stat-grid,
   .score-grid {
     grid-template-columns: 1fr;
+  }
+
+  .agent-card__header {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-card__summary {
+    align-items: start;
+    justify-items: start;
   }
 
   .main-nav {
