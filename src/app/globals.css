@@ -1,7 +1,7 @@
 :root {
   --bg: #f4efe6;
   --bg-strong: #ead8b4;
-  --panel: rgba(255, 250, 242, 0.84);
+  --panel: rgba(255, 250, 242, 0.96);
   --panel-strong: #fff8ee;
   --text: #1c1813;
   --muted: #64594d;
@@ -10,7 +10,7 @@
   --accent-deep: #8e2d10;
   --accent-soft: #ffd9bb;
   --sea: #1d6d67;
-  --shadow: 0 24px 60px rgba(80, 54, 19, 0.13);
+  --shadow: 0 14px 28px rgba(80, 54, 19, 0.08);
   --radius: 24px;
   --radius-sm: 16px;
 }
@@ -65,21 +65,13 @@ textarea {
 }
 
 .page-shell {
+  background-image:
+    linear-gradient(rgba(28, 24, 19, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(28, 24, 19, 0.04) 1px, transparent 1px);
+  background-position: center top;
+  background-size: 42px 42px;
   min-height: 100vh;
   position: relative;
-}
-
-.page-shell::before {
-  background-image:
-    linear-gradient(rgba(28, 24, 19, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(28, 24, 19, 0.05) 1px, transparent 1px);
-  background-position: center;
-  background-size: 42px 42px;
-  content: "";
-  inset: 0;
-  opacity: 0.34;
-  pointer-events: none;
-  position: fixed;
 }
 
 .page-main,
@@ -103,10 +95,10 @@ textarea {
 
 .site-header__inner {
   align-items: center;
-  backdrop-filter: blur(18px);
-  background: rgba(244, 239, 230, 0.72);
+  background: rgba(244, 239, 230, 0.94);
   border: 1px solid rgba(28, 24, 19, 0.08);
   border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(80, 54, 19, 0.06);
   display: flex;
   justify-content: space-between;
   margin-top: 1rem;
@@ -218,7 +210,6 @@ textarea {
 }
 
 .panel {
-  backdrop-filter: blur(8px);
   background: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.62);
   border-radius: var(--radius);
@@ -266,6 +257,24 @@ textarea {
 .match-list {
   display: grid;
   gap: 1rem;
+}
+
+.game-grid > *,
+.card-grid > *,
+.match-list > *,
+.score-grid > * {
+  contain: layout paint style;
+  content-visibility: auto;
+}
+
+.game-grid > *,
+.card-grid > *,
+.match-list > * {
+  contain-intrinsic-size: 320px;
+}
+
+.score-grid > * {
+  contain-intrinsic-size: 96px;
 }
 
 .stat-grid {
