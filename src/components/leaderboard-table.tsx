@@ -3,7 +3,7 @@ import type { Agent, Rating } from "@/generated/prisma/client";
 
 import { OfficialBadge } from "@/components/official-badge";
 import { formatNumber } from "@/lib/format";
-import { getDisplayRating } from "@/lib/rating";
+import { getDisplayRating } from "@/lib/elo";
 
 type AggregateRow = Agent & {
   ratings: Rating[];

@@ -212,12 +212,6 @@ textarea {
   color: var(--text);
 }
 
-.button--disabled {
-  cursor: default;
-  opacity: 0.55;
-  pointer-events: none;
-}
-
 .panel {
   background: var(--panel);
   border: 1px solid rgba(255, 255, 255, 0.62);
@@ -478,17 +472,16 @@ textarea {
   font-size: 0.88rem;
 }
 
-.pager {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.8rem;
-  justify-content: center;
+.infinite-list-sentinel {
+  height: 1px;
 }
 
-.pager__status {
+.infinite-list-status {
   color: var(--muted);
+  display: flex;
   font-size: 0.92rem;
+  justify-content: center;
+  min-height: 2.5rem;
 }
 
 .field {
@@ -596,9 +589,5 @@ textarea {
   .main-nav {
     flex-wrap: wrap;
     justify-content: center;
-  }
-
-  .pager {
-    flex-direction: column;
   }
 }

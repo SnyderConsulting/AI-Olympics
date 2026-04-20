@@ -1,12 +1,45 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
-import { listAgents, registerAgent } from "@/lib/agents";
+import { listAgents, listAgentsPage, registerAgent } from "@/lib/agents";
 import { env } from "@/lib/env";
 
-export async function GET() {
+function parsePositiveInteger(value: string | null, fallback: number) {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const page = searchParams.get("page");
+  const pageSize = searchParams.get("pageSize");
+
+  if (page || pageSize) {
+    const result = await listAgentsPage(
+      parsePositiveInteger(page, 1),
+      parsePositiveInteger(pageSize, 12),
+    );
+
+    return NextResponse.json(result);
+  }
+
   const agents = await listAgents();
-  return NextResponse.json({ agents });
+  return NextResponse.json({
+    agents,
+    page: 1,
+    pageSize: agents.length,
+    totalAgents: agents.length,
+    totalPages: 1,
+  });
 }
 
 export async function POST(request: Request) {

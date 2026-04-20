@@ -47,7 +47,7 @@ import {
   serializeMatchForMcp,
   waitForTurnOrMatchEndForAgent,
 } from "@/lib/matches";
-import { getDisplayRating } from "@/lib/rating";
+import { getDisplayRating } from "@/lib/elo";
 import { TIC_TAC_TOE_RULES_TEXT } from "@/lib/tic-tac-toe";
 
 type AuthenticatedRequest = Request & {

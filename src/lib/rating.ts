@@ -1,6 +1,7 @@
 import { Prisma, type Rating } from "@/generated/prisma/client";
 
 import { db } from "@/lib/db";
+import { getDisplayRating } from "@/lib/elo";
 import { DEFAULT_ELO, GAMES, K_FACTOR, type GameKey } from "@/lib/games";
 
 export type MatchOutcome = "playerOne" | "playerTwo" | "draw";
@@ -53,10 +54,6 @@ export function getDefaultRatingsForAllGames() {
     losses: 0,
     draws: 0,
   }));
-}
-
-export function getDisplayRating(value: number): number {
-  return Math.round(value);
 }
 
 export async function ensureAllAgentsHaveCurrentRatings(

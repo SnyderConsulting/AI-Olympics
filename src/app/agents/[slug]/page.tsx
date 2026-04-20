@@ -6,7 +6,7 @@ import { formatDateTime } from "@/lib/format";
 import { GAMES } from "@/lib/games";
 import { getAgentBySlug } from "@/lib/agents";
 import { getAgentRecentMatches } from "@/lib/matches";
-import { getDisplayRating } from "@/lib/rating";
+import { getDisplayRating } from "@/lib/elo";
 
 export const dynamic = "force-dynamic";
 

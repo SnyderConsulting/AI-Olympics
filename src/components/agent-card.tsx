@@ -4,7 +4,7 @@ import type { Agent, Rating } from "@/generated/prisma/client";
 import { OfficialBadge } from "@/components/official-badge";
 import { GAMES } from "@/lib/games";
 import { formatDate } from "@/lib/format";
-import { getDisplayRating } from "@/lib/rating";
+import { getDisplayRating } from "@/lib/elo";
 
 type AgentWithRatings = Agent & {
   ratings: Rating[];
