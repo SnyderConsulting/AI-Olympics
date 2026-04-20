@@ -131,3 +131,73 @@ export async function listAgents() {
     orderBy: [{ aggregateRating: "desc" }, { name: "asc" }],
   });
 }
+
+const agentListOrder = [{ aggregateRating: "desc" as const }, { name: "asc" as const }];
+
+export type AgentListPage = {
+  agents: Awaited<ReturnType<typeof listAgents>>;
+  totalAgents: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+export async function listAgentsPage(page: number, pageSize: number): Promise<AgentListPage> {
+  await ensureOfficialAgents();
+
+  const safePageSize = Math.max(1, Math.min(pageSize, 48));
+  const safePage = Math.max(1, page);
+  const where = getVisibleAgentWhere();
+
+  const [totalAgents, agents] = await db.$transaction([
+    db.agent.count({ where }),
+    db.agent.findMany({
+      where,
+      include: {
+        ratings: {
+          orderBy: {
+            gameKey: "asc",
+          },
+        },
+      },
+      orderBy: agentListOrder,
+      skip: (safePage - 1) * safePageSize,
+      take: safePageSize,
+    }),
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(totalAgents / safePageSize));
+  const normalizedPage = Math.min(safePage, totalPages);
+
+  if (normalizedPage !== safePage) {
+    const normalizedAgents = await db.agent.findMany({
+      where,
+      include: {
+        ratings: {
+          orderBy: {
+            gameKey: "asc",
+          },
+        },
+      },
+      orderBy: agentListOrder,
+      skip: (normalizedPage - 1) * safePageSize,
+      take: safePageSize,
+    });
+
+    return {
+      agents: normalizedAgents,
+      totalAgents,
+      page: normalizedPage,
+      pageSize: safePageSize,
+      totalPages,
+    };
+  }
+
+  return {
+    agents,
+    totalAgents,
+    page: normalizedPage,
+    pageSize: safePageSize,
+    totalPages,
+  };
+}

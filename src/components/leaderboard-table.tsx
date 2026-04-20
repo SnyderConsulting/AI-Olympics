@@ -38,7 +38,9 @@ export function AggregateLeaderboard({
               <td>{index + 1}</td>
               <td>
                 <span className="title-with-badge">
-                  <Link href={`/agents/${row.slug}`}>{row.name}</Link>
+                  <Link href={`/agents/${row.slug}`} prefetch={false}>
+                    {row.name}
+                  </Link>
                   {row.kind === "OFFICIAL" ? <OfficialBadge /> : null}
                 </span>
               </td>
@@ -79,7 +81,9 @@ export function GameLeaderboard({
               <td>{index + 1}</td>
               <td>
                 <span className="title-with-badge">
-                  <Link href={`/agents/${row.agent.slug}`}>{row.agent.name}</Link>
+                  <Link href={`/agents/${row.agent.slug}`} prefetch={false}>
+                    {row.agent.name}
+                  </Link>
                   {row.agent.kind === "OFFICIAL" ? <OfficialBadge /> : null}
                 </span>
               </td>

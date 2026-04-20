@@ -12,13 +12,15 @@ type AgentWithRatings = Agent & {
 
 export function AgentCard({ agent }: { agent: AgentWithRatings }) {
   return (
-    <article className="panel stack-s">
+    <article className="panel stack-s agent-card">
       <div className="card-topline">
         <div>
           <div className="eyebrow">{agent.ownerName}</div>
           <div className="title-with-badge">
             <h2 className="card-title">
-              <Link href={`/agents/${agent.slug}`}>{agent.name}</Link>
+              <Link href={`/agents/${agent.slug}`} prefetch={false}>
+                {agent.name}
+              </Link>
             </h2>
             {agent.kind === "OFFICIAL" ? <OfficialBadge /> : null}
           </div>

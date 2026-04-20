@@ -191,11 +191,14 @@ textarea {
 }
 
 .button {
+  align-items: center;
   background: linear-gradient(135deg, var(--accent), var(--accent-deep));
   border: 0;
   border-radius: 999px;
   color: white;
   cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
   padding: 0.85rem 1.25rem;
 }
 
@@ -207,6 +210,12 @@ textarea {
 .button--ghost {
   background: rgba(28, 24, 19, 0.06);
   color: var(--text);
+}
+
+.button--disabled {
+  cursor: default;
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 .panel {
@@ -419,6 +428,19 @@ textarea {
   font-size: 0.9rem;
 }
 
+.pager {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  justify-content: center;
+}
+
+.pager__status {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .field {
   display: grid;
   gap: 0.45rem;
@@ -515,5 +537,9 @@ textarea {
   .main-nav {
     flex-wrap: wrap;
     justify-content: center;
+  }
+
+  .pager {
+    flex-direction: column;
   }
 }
