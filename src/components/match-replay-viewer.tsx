@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useState } from "react";
 
 import { formatDateTime } from "@/lib/format";
@@ -14,6 +15,7 @@ export function MatchReplayViewer({ replay }: { replay: MatchReplay }) {
 
   const frame = replay.frames[selectedFrameIndex];
   const maxFrameIndex = replay.frames.length - 1;
+  const progress = maxFrameIndex === 0 ? 100 : (selectedFrameIndex / maxFrameIndex) * 100;
 
   return (
     <div className="replay-viewer stack-s">
@@ -37,6 +39,7 @@ export function MatchReplayViewer({ replay }: { replay: MatchReplay }) {
           min={0}
           onChange={(event) => setSelectedFrameIndex(Number(event.currentTarget.value))}
           step={1}
+          style={{ "--replay-progress": `${progress}%` } as CSSProperties}
           type="range"
           value={selectedFrameIndex}
         />
