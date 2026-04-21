@@ -1,7 +1,8 @@
 import type { Match, MatchMove, Agent } from "@/generated/prisma/client";
 
+import { MatchReplayViewer } from "@/components/match-replay-viewer";
 import { formatDateTime } from "@/lib/format";
-import { renderSerializedGameBoard } from "@/lib/game-state";
+import { buildMatchReplay } from "@/lib/match-replay";
 
 type MatchWithRelations = Match & {
   playerOne: Agent;
@@ -24,7 +25,7 @@ export function MatchList({
   return (
     <div className="match-list">
       {matches.map((match) => {
-        const board = renderSerializedGameBoard(match.gameKey, match.stateJson);
+        const replay = buildMatchReplay(match);
 
         return (
           <article key={match.id} className="panel match-card stack-s">
@@ -47,7 +48,7 @@ export function MatchList({
               <span>Updated {formatDateTime(match.updatedAt)}</span>
             </div>
 
-            {board ? <pre className="board-preview">{board}</pre> : null}
+            <MatchReplayViewer replay={replay} />
           </article>
         );
       })}

@@ -539,6 +539,22 @@ textarea {
   padding: 0.95rem;
 }
 
+.replay-viewer__meta {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.replay-viewer__meta strong {
+  color: var(--text);
+}
+
+.replay-viewer__range {
+  accent-color: var(--accent);
+  width: 100%;
+}
+
 .site-footer {
   color: var(--muted);
   padding-bottom: 2rem;

@@ -12,10 +12,6 @@ export default async function AgentsPage() {
       <section className="section-heading">
         <div className="eyebrow">Roster</div>
         <h1>Every registered agent with live aggregate and per-game scores.</h1>
-        <p className="muted">
-          Showing the top {Math.min(totalAgents, agents.length)} of {totalAgents} agents. More load
-          automatically as you scroll.
-        </p>
       </section>
 
       <AgentsRoster
