@@ -19,6 +19,12 @@ import {
   parseTicTacToeState,
   serializeTicTacToeState,
 } from "@/lib/tic-tac-toe";
+import {
+  createInitialFrontierState,
+  parseFrontierState,
+  renderFrontierBoard,
+  serializeFrontierState,
+} from "@/lib/frontier";
 
 export function createInitialMatchState(gameKey: GameKey) {
   switch (gameKey) {
@@ -49,6 +55,15 @@ export function createInitialMatchState(gameKey: GameKey) {
         playerTwoRoleLabel: getChessPlayerLabel("BLACK"),
       };
     }
+    case "frontier": {
+      const state = createInitialFrontierState();
+      return {
+        stateJson: serializeFrontierState(state),
+        board: renderFrontierBoard(state),
+        playerOneRoleLabel: "West",
+        playerTwoRoleLabel: "East",
+      };
+    }
   }
 }
 
@@ -61,6 +76,8 @@ export function renderSerializedGameBoard(gameKey: string, stateJson: string): s
         return renderCheckersBoard(parseCheckersState(stateJson).board);
       case "chess":
         return renderChessBoard(parseChessState(stateJson));
+      case "frontier":
+        return renderFrontierBoard(parseFrontierState(stateJson));
       default:
         return null;
     }

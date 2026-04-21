@@ -4,6 +4,7 @@ coverage
 .DS_Store
 *.log
 .runlogs
+.wamdd
 
 .env
 .env.local

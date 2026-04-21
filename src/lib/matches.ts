@@ -26,6 +26,28 @@ import {
 } from "@/lib/chess";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
+import {
+  applyFrontierCommandActions,
+  chooseOfficialFrontierActions,
+  FRONTIER_COMMAND_WINDOW_MS,
+  FRONTIER_MATCH_DURATION_MS,
+  FRONTIER_RULES_TEXT,
+  FRONTIER_TICK_MS,
+  getFrontierOpponent,
+  getFrontierOwner,
+  getFrontierOwnerLabel,
+  getFrontierSecondsRemaining,
+  getFrontierSecondsUntilNextWindow,
+  getFrontierWindowIndex,
+  parseFrontierState,
+  renderFrontierBoard,
+  serializeFrontierState,
+  tickFrontierState,
+  type FrontierAction,
+  type FrontierOwner,
+  type FrontierSimulationEvent,
+  type FrontierState,
+} from "@/lib/frontier";
 import { createInitialMatchState, renderSerializedGameBoard } from "@/lib/game-state";
 import { getGameDefinition, type GameKey } from "@/lib/games";
 import {
@@ -37,6 +59,7 @@ import {
   ensureOfficialAgents,
   getVisibleAgentWhere,
   isOfficialAgentRunnable,
+  listEligibleOfficialAgentsForGame,
   listRunnableOfficialAgents,
 } from "@/lib/official-agents";
 import {
@@ -62,9 +85,11 @@ type TransactionClient = Prisma.TransactionClient;
 
 const MATCHMAKING_POLL_INTERVAL_MS = 500;
 const MATCH_TIMEOUT_SWEEP_INTERVAL_MS = 5_000;
+const FRONTIER_MATCH_SWEEP_INTERVAL_MS = 1_000;
 
 declare global {
   var matchTimeoutWorkerStarted: boolean | undefined;
+  var frontierMatchWorkerStarted: boolean | undefined;
 }
 
 const matchInclude = {
@@ -83,6 +108,8 @@ type MatchWithDetails = Prisma.MatchGetPayload<{
 }>;
 
 export function ensureMatchTimeoutWorker() {
+  ensureFrontierMatchWorker();
+
   if (globalThis.matchTimeoutWorkerStarted || process.env.NODE_ENV === "test") {
     return;
   }
@@ -101,8 +128,27 @@ export function ensureMatchTimeoutWorker() {
   timer.unref?.();
 }
 
+function ensureFrontierMatchWorker() {
+  if (globalThis.frontierMatchWorkerStarted || process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  globalThis.frontierMatchWorkerStarted = true;
+
+  const sweep = () => {
+    void sweepActiveFrontierMatches().catch((error) => {
+      console.error("Failed to advance active Frontier matches", error);
+    });
+  };
+
+  sweep();
+
+  const timer = setInterval(sweep, FRONTIER_MATCH_SWEEP_INTERVAL_MS);
+  timer.unref?.();
+}
+
 export async function getRecentMatches(limit = 12) {
-  await sweepTimedOutMatches();
+  await Promise.all([sweepTimedOutMatches(), sweepActiveFrontierMatches()]);
   const visibleAgentWhere = getVisibleAgentWhere();
 
   return db.match.findMany({
@@ -130,7 +176,10 @@ export async function getRecentMatches(limit = 12) {
 }
 
 export async function getAgentRecentMatches(agentId: string, limit = 10) {
-  await sweepTimedOutMatchesForAgent(agentId);
+  await Promise.all([
+    sweepTimedOutMatchesForAgent(agentId),
+    sweepActiveFrontierMatchesForAgent(agentId),
+  ]);
   const visibleAgentWhere = getVisibleAgentWhere();
 
   return db.match.findMany({
@@ -372,7 +421,10 @@ async function enqueueOrMatchAgainstQueuedUser(agentId: string, gameKey: GameKey
 }
 
 async function createFallbackMatchForAgent(agentId: string, gameKey: GameKey) {
-  const officialAgents = await listRunnableOfficialAgents();
+  const officialAgents =
+    gameKey === "frontier"
+      ? await listEligibleOfficialAgentsForGame(gameKey)
+      : await listRunnableOfficialAgents();
 
   return db.$transaction(async (tx) => {
     const existingMatch = await findActiveMatchForAgentGameInTransaction(tx, agentId, gameKey);
@@ -558,7 +610,7 @@ async function createActiveMatch(
       status: MatchStatus.ACTIVE,
       playerOneId: args.playerOneId,
       playerTwoId: args.playerTwoId,
-      currentTurnAgentId: args.playerOneId,
+      currentTurnAgentId: args.gameKey === "frontier" ? null : args.playerOneId,
       startedAt: new Date(),
       stateJson: initialState.stateJson,
     },
@@ -675,6 +727,46 @@ async function sweepTimedOutMatchesForAgent(agentId: string) {
   }
 }
 
+async function sweepActiveFrontierMatches(limit = 25) {
+  const matches = await db.match.findMany({
+    where: {
+      gameKey: "frontier",
+      status: MatchStatus.ACTIVE,
+    },
+    select: {
+      id: true,
+    },
+    orderBy: {
+      updatedAt: "asc",
+    },
+    take: limit,
+  });
+
+  for (const match of matches) {
+    await advanceFrontierMatchToNow(match.id);
+  }
+}
+
+async function sweepActiveFrontierMatchesForAgent(agentId: string) {
+  const matches = await db.match.findMany({
+    where: {
+      gameKey: "frontier",
+      status: MatchStatus.ACTIVE,
+      OR: [{ playerOneId: agentId }, { playerTwoId: agentId }],
+    },
+    select: {
+      id: true,
+    },
+    orderBy: {
+      updatedAt: "asc",
+    },
+  });
+
+  for (const match of matches) {
+    await advanceFrontierMatchToNow(match.id);
+  }
+}
+
 async function resolveTimedOutMatch(matchId: string) {
   const match = await getMatchWithDetails(matchId);
 
@@ -768,7 +860,10 @@ function createForfeitStateJson(match: MatchWithDetails, outcome: MatchOutcome) 
 }
 
 export async function listMatchesForAgent(agentId: string) {
-  await sweepTimedOutMatchesForAgent(agentId);
+  await Promise.all([
+    sweepTimedOutMatchesForAgent(agentId),
+    sweepActiveFrontierMatchesForAgent(agentId),
+  ]);
 
   return db.match.findMany({
     where: {
@@ -832,12 +927,17 @@ export async function waitForTurnOrMatchEndForAgent(args: {
   const maxWaitMs = Math.max(0, (args.maxWaitSeconds ?? 25) * 1000);
   const waitDeadline = Date.now() + maxWaitMs;
   let match = await playOfficialTurnsUntilHumanOrFinished(args.matchId);
+  const initialUpdatedAt = match.updatedAt.getTime();
 
   assertAgentIsMatchParticipant(match, args.agentId);
 
   while (
     match.status === MatchStatus.ACTIVE &&
-    match.currentTurnAgentId !== args.agentId &&
+    !(
+      match.currentTurnAgentId
+        ? match.currentTurnAgentId === args.agentId
+        : match.updatedAt.getTime() > initialUpdatedAt
+    ) &&
     Date.now() < waitDeadline
   ) {
     await sleep(Math.min(MATCHMAKING_POLL_INTERVAL_MS, waitDeadline - Date.now()));
@@ -848,7 +948,11 @@ export async function waitForTurnOrMatchEndForAgent(args: {
     match,
     timedOutWaiting:
       match.status === MatchStatus.ACTIVE &&
-      match.currentTurnAgentId !== args.agentId &&
+      !(
+        match.currentTurnAgentId
+          ? match.currentTurnAgentId === args.agentId
+          : match.updatedAt.getTime() > initialUpdatedAt
+      ) &&
       Date.now() >= waitDeadline,
   };
 }
@@ -916,6 +1020,157 @@ export async function getChessMatchStateForAgent(args: {
     winner: state.winner,
     winnerReason: state.winnerReason,
     turnCount: state.turnCount,
+  };
+}
+
+export async function getFrontierMatchStateForAgent(args: {
+  agentId: string;
+  matchId: string;
+}) {
+  const match = await advanceFrontierMatchToNow(args.matchId);
+
+  if (!match || match.gameKey !== "frontier") {
+    throw new Error("Match not found.");
+  }
+
+  assertAgentIsMatchParticipant(match, args.agentId);
+
+  if (!match.startedAt) {
+    throw new Error("Frontier match has not started.");
+  }
+
+  const state = parseFrontierState(match.stateJson);
+  const owner = getFrontierOwner(match.playerOneId === args.agentId);
+  const opponentOwner = getFrontierOpponent(owner);
+  const currentWindowIndex = getFrontierWindowIndex(state.elapsedMs);
+  const pendingCommands = state.pendingCommands[owner];
+  const nextWindowClosesAt = new Date(
+    match.startedAt.getTime() + (currentWindowIndex + 1) * FRONTIER_COMMAND_WINDOW_MS,
+  ).toISOString();
+
+  return {
+    match,
+    board: renderFrontierBoard(state),
+    youAre: owner,
+    yourLabel: getFrontierOwnerLabel(owner),
+    opponentLabel: getFrontierOwnerLabel(opponentOwner),
+    currentWindowIndex,
+    secondsUntilNextWindow: getFrontierSecondsUntilNextWindow(state),
+    matchSecondsRemaining: getFrontierSecondsRemaining(state),
+    nextWindowClosesAt,
+    income: state.income,
+    incomePerSecond: {
+      [owner]: getFrontierIncomePerSecondForMatch(state, owner),
+      [opponentOwner]: getFrontierIncomePerSecondForMatch(state, opponentOwner),
+    },
+    ownedArmies: state.armies
+      .filter((army) => army.owner === owner)
+      .map((army) => serializeFrontierArmyForAgent(army)),
+    enemyArmies: state.armies
+      .filter((army) => army.owner === opponentOwner)
+      .map((army) => serializeFrontierArmyForAgent(army)),
+    sites: state.sites.map((site) => ({
+      id: site.id,
+      x: site.x,
+      y: site.y,
+      controller: site.controller,
+      captureOwner: site.captureOwner,
+      captureProgressMs: site.captureProgressMs,
+    })),
+    bases: state.bases.map((base) => ({
+      id: base.id,
+      owner: base.owner,
+      label: getFrontierOwnerLabel(base.owner),
+      x: base.x,
+      y: base.y,
+      alive: base.alive,
+    })),
+    pendingSubmission:
+      pendingCommands && pendingCommands.windowIndex === currentWindowIndex
+        ? {
+            windowIndex: pendingCommands.windowIndex,
+            actions: pendingCommands.actions,
+          }
+        : null,
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    rules: FRONTIER_RULES_TEXT,
+  };
+}
+
+export async function submitFrontierOrdersForAgent(args: {
+  agentId: string;
+  matchId: string;
+  actions: FrontierAction[];
+}) {
+  const result = await db.$transaction(async (tx) => {
+    const match = await advanceFrontierMatchToNowInTransaction(tx, args.matchId);
+
+    if (!match || match.gameKey !== "frontier") {
+      throw new Error("Match not found.");
+    }
+
+    assertAgentIsMatchParticipant(match, args.agentId);
+
+    if (match.status !== MatchStatus.ACTIVE) {
+      throw new Error("This match is not active.");
+    }
+
+    const state = parseFrontierState(match.stateJson);
+    const owner = getFrontierOwner(match.playerOneId === args.agentId);
+    const currentWindowIndex = getFrontierWindowIndex(state.elapsedMs);
+    const { appliedActions } = applyFrontierCommandActions(state, owner, args.actions);
+
+    if (appliedActions.length === 0) {
+      throw new Error("No valid Frontier actions were provided.");
+    }
+
+    state.pendingCommands[owner] = {
+      windowIndex: currentWindowIndex,
+      actions: appliedActions,
+    };
+
+    const update = await tx.match.updateMany({
+      where: {
+        id: match.id,
+        updatedAt: match.updatedAt,
+        status: MatchStatus.ACTIVE,
+      },
+      data: {
+        stateJson: serializeFrontierState(state),
+      },
+    });
+
+    if (update.count !== 1) {
+      return {
+        match: await tx.match.findUniqueOrThrow({
+          where: { id: match.id },
+          include: matchInclude,
+        }),
+        acceptedActions: appliedActions,
+        currentWindowIndex,
+      };
+    }
+
+    return {
+      match: await tx.match.findUniqueOrThrow({
+        where: { id: match.id },
+        include: matchInclude,
+      }),
+      acceptedActions: appliedActions,
+      currentWindowIndex,
+    };
+  });
+
+  const state = await getFrontierMatchStateForAgent({
+    agentId: args.agentId,
+    matchId: result.match.id,
+  });
+
+  return {
+    ...state,
+    acceptedActions: result.acceptedActions,
+    submissionWindowIndex: result.currentWindowIndex,
   };
 }
 
@@ -1260,8 +1515,232 @@ export async function playChessTurn(args: {
   };
 }
 
+async function advanceFrontierMatchToNow(matchId: string) {
+  return db.$transaction(async (tx) => advanceFrontierMatchToNowInTransaction(tx, matchId));
+}
+
+async function advanceFrontierMatchToNowInTransaction(
+  tx: TransactionClient,
+  matchId: string,
+) {
+  const match = await tx.match.findUnique({
+    where: { id: matchId },
+    include: matchInclude,
+  });
+
+  if (!match) {
+    throw new Error("Match not found.");
+  }
+
+  if (match.gameKey !== "frontier" || match.status !== MatchStatus.ACTIVE || !match.startedAt) {
+    return match;
+  }
+
+  const targetElapsedMs = Math.min(
+    FRONTIER_MATCH_DURATION_MS,
+    Math.max(0, Date.now() - match.startedAt.getTime()),
+  );
+  let state = parseFrontierState(match.stateJson);
+
+  if (targetElapsedMs <= state.elapsedMs) {
+    return match;
+  }
+
+  let nextMoveIndex = match.moves.length;
+  const moveRows: Prisma.MatchMoveCreateManyInput[] = [];
+
+  while (state.elapsedMs < targetElapsedMs && !state.winner) {
+    const currentWindowIndex = getFrontierWindowIndex(state.elapsedMs);
+    const nextWindowBoundaryMs = (currentWindowIndex + 1) * FRONTIER_COMMAND_WINDOW_MS;
+    const nextElapsedMs = Math.min(
+      targetElapsedMs,
+      state.elapsedMs + FRONTIER_TICK_MS,
+      nextWindowBoundaryMs,
+    );
+    const tickResult = tickFrontierState(state, nextElapsedMs - state.elapsedMs);
+    state = tickResult.state;
+    nextMoveIndex = appendFrontierEventRows({
+      match,
+      state,
+      events: tickResult.events,
+      moveRows,
+      nextMoveIndex,
+    });
+
+    if (state.winner) {
+      break;
+    }
+
+    if (state.elapsedMs === nextWindowBoundaryMs) {
+      const orderResult = applyFrontierWindowOrders(match, state, currentWindowIndex);
+      state = orderResult.state;
+      nextMoveIndex = appendFrontierFrameRow({
+        match,
+        moveRows,
+        nextMoveIndex,
+        agentId: match.playerOneId,
+        actorName: null,
+        board: renderFrontierBoard(state),
+        headline: `Window ${currentWindowIndex + 1} orders applied`,
+        notation: orderResult.summary,
+        createdAt: frontierReplayTimestamp(match, state),
+      });
+    }
+  }
+
+  const nextResult = frontierWinnerToMatchResult(state.winner);
+  const winnerAgentId = frontierWinnerToAgentId(match, state.winner);
+  const finishedAt =
+    state.winner && match.startedAt
+      ? new Date(match.startedAt.getTime() + state.elapsedMs)
+      : null;
+
+  const update = await tx.match.updateMany({
+    where: {
+      id: match.id,
+      status: MatchStatus.ACTIVE,
+      updatedAt: match.updatedAt,
+    },
+    data: {
+      currentTurnAgentId: null,
+      finishedAt,
+      result: nextResult,
+      stateJson: serializeFrontierState(state),
+      status: state.winner ? MatchStatus.FINISHED : MatchStatus.ACTIVE,
+      winnerAgentId,
+    },
+  });
+
+  if (update.count !== 1) {
+    return tx.match.findUniqueOrThrow({
+      where: { id: match.id },
+      include: matchInclude,
+    });
+  }
+
+  if (moveRows.length > 0) {
+    await tx.matchMove.createMany({
+      data: moveRows,
+    });
+  }
+
+  if (state.winner && nextResult && match.playerTwoId) {
+    await applyRatingsForCompletedMatch(tx, {
+      gameKey: "frontier",
+      playerOneId: match.playerOneId,
+      playerTwoId: match.playerTwoId,
+      outcome: toOutcome(nextResult),
+    });
+  }
+
+  return tx.match.findUniqueOrThrow({
+    where: { id: match.id },
+    include: matchInclude,
+  });
+}
+
+function applyFrontierWindowOrders(
+  match: MatchWithDetails,
+  state: FrontierState,
+  closedWindowIndex: number,
+) {
+  let nextState = state;
+  const summaries: string[] = [];
+
+  for (const owner of ["ONE", "TWO"] as const) {
+    const participant = getFrontierParticipantForOwner(match, owner);
+    const pendingCommands = nextState.pendingCommands[owner];
+    const actions =
+      participant.kind === AgentKind.OFFICIAL
+        ? chooseOfficialFrontierActions(nextState, owner)
+        : pendingCommands?.windowIndex === closedWindowIndex
+          ? pendingCommands.actions
+          : [];
+
+    if (pendingCommands && pendingCommands.windowIndex <= closedWindowIndex) {
+      nextState.pendingCommands[owner] = null;
+    }
+
+    if (actions.length === 0) {
+      continue;
+    }
+
+    const applied = applyFrontierCommandActions(nextState, owner, actions);
+    nextState = applied.state;
+    summaries.push(`${participant.name}: ${formatFrontierActionSummary(applied.appliedActions)}`);
+  }
+
+  return {
+    state: nextState,
+    summary: summaries.join(" | ") || "No new orders",
+  };
+}
+
+function appendFrontierEventRows(args: {
+  match: MatchWithDetails;
+  state: FrontierState;
+  events: FrontierSimulationEvent[];
+  moveRows: Prisma.MatchMoveCreateManyInput[];
+  nextMoveIndex: number;
+}) {
+  let nextMoveIndex = args.nextMoveIndex;
+
+  for (const event of args.events) {
+    const frontierFrame = describeFrontierEvent(args.match, event);
+
+    nextMoveIndex = appendFrontierFrameRow({
+      match: args.match,
+      moveRows: args.moveRows,
+      nextMoveIndex,
+      agentId: frontierFrame.agentId,
+      actorName: frontierFrame.actorName,
+      board: renderFrontierBoard(args.state),
+      headline: frontierFrame.headline,
+      notation: frontierFrame.notation,
+      createdAt: frontierReplayTimestamp(args.match, args.state),
+      isTerminal: event.type === "match-ended",
+    });
+  }
+
+  return nextMoveIndex;
+}
+
+function appendFrontierFrameRow(args: {
+  match: MatchWithDetails;
+  moveRows: Prisma.MatchMoveCreateManyInput[];
+  nextMoveIndex: number;
+  agentId: string;
+  actorName: string | null;
+  board: string;
+  headline: string;
+  notation: string | null;
+  createdAt: string;
+  isTerminal?: boolean;
+}) {
+  args.moveRows.push({
+    matchId: args.match.id,
+    agentId: args.agentId,
+    moveIndex: args.nextMoveIndex,
+    payloadJson: JSON.stringify({
+      kind: "frontier-frame",
+      actorName: args.actorName,
+      board: args.board,
+      headline: args.headline,
+      notation: args.notation,
+      createdAt: args.createdAt,
+      isTerminal: args.isTerminal ?? false,
+    }),
+  });
+
+  return args.nextMoveIndex + 1;
+}
+
 async function playOfficialTurnsUntilHumanOrFinished(matchId: string) {
   let match = await getMatchWithDetails(matchId);
+
+  if (match.gameKey === "frontier") {
+    return advanceFrontierMatchToNow(matchId);
+  }
 
   while (match.status === MatchStatus.ACTIVE && match.currentTurnAgentId) {
     match = await resolveTimedOutMatch(match.id);
@@ -1385,6 +1864,158 @@ async function playOfficialTurnsUntilHumanOrFinished(matchId: string) {
 function assertAgentIsMatchParticipant(match: MatchWithDetails, agentId: string) {
   if (match.playerOneId !== agentId && match.playerTwoId !== agentId) {
     throw new Error("You are not a participant in this match.");
+  }
+}
+
+function serializeFrontierArmyForAgent(
+  army: FrontierState["armies"][number],
+) {
+  return {
+    id: army.id,
+    soldiers: army.soldiers,
+    x: army.x,
+    y: army.y,
+    order: army.order,
+  };
+}
+
+function getFrontierIncomePerSecondForMatch(state: FrontierState, owner: FrontierOwner) {
+  return 1 + state.sites.filter((site) => site.controller === owner).length;
+}
+
+function getFrontierParticipantForOwner(
+  match: Pick<MatchWithDetails, "playerOneId" | "playerOne" | "playerTwoId" | "playerTwo">,
+  owner: FrontierOwner,
+) {
+  if (owner === "ONE") {
+    return {
+      id: match.playerOneId,
+      name: match.playerOne.name,
+      kind: match.playerOne.kind,
+    };
+  }
+
+  return {
+    id: match.playerTwoId ?? match.playerOneId,
+    name: match.playerTwo?.name ?? "East",
+    kind: match.playerTwo?.kind ?? AgentKind.USER,
+  };
+}
+
+function formatFrontierActionSummary(actions: FrontierAction[]) {
+  return actions
+    .map((action) => {
+      if (action.type === "MOVE") {
+        return `MOVE ${action.armyId} ${action.x},${action.y}`;
+      }
+
+      return `ATTACK ${action.armyId} ${action.targetId}`;
+    })
+    .join(" ; ");
+}
+
+function frontierReplayTimestamp(
+  match: Pick<MatchWithDetails, "startedAt">,
+  state: FrontierState,
+) {
+  const baseTime = match.startedAt?.getTime() ?? Date.now();
+  return new Date(baseTime + state.elapsedMs).toISOString();
+}
+
+function frontierWinnerToMatchResult(winner: FrontierState["winner"]) {
+  if (winner === "ONE") {
+    return MatchResult.PLAYER_ONE;
+  }
+
+  if (winner === "TWO") {
+    return MatchResult.PLAYER_TWO;
+  }
+
+  if (winner === "DRAW") {
+    return MatchResult.DRAW;
+  }
+
+  return null;
+}
+
+function frontierWinnerToAgentId(match: MatchWithDetails, winner: FrontierState["winner"]) {
+  if (winner === "ONE") {
+    return match.playerOneId;
+  }
+
+  if (winner === "TWO") {
+    return match.playerTwoId ?? null;
+  }
+
+  return null;
+}
+
+function describeFrontierEvent(match: MatchWithDetails, event: FrontierSimulationEvent) {
+  switch (event.type) {
+    case "spawn": {
+      const participant = getFrontierParticipantForOwner(match, event.owner);
+      return {
+        agentId: participant.id,
+        actorName: participant.name,
+        headline: `${participant.name} spawned ${event.soldiers} soldiers`,
+        notation: `${event.armyId} +${event.soldiers}`,
+      };
+    }
+    case "merge": {
+      const participant = getFrontierParticipantForOwner(match, event.owner);
+      return {
+        agentId: participant.id,
+        actorName: participant.name,
+        headline: `${participant.name} merged ${event.absorbedArmyId} into ${event.targetArmyId}`,
+        notation: `${event.targetArmyId} now has ${event.resultingSoldiers}`,
+      };
+    }
+    case "battle": {
+      const winner = getFrontierParticipantForOwner(match, event.winnerOwner);
+      return {
+        agentId: winner.id,
+        actorName: winner.name,
+        headline: `${winner.name} won a battle near ${event.location.x},${event.location.y}`,
+        notation: `${event.winnerArmyId} survived with ${event.survivors}`,
+      };
+    }
+    case "site-captured": {
+      const participant = getFrontierParticipantForOwner(match, event.owner);
+      return {
+        agentId: participant.id,
+        actorName: participant.name,
+        headline: `${participant.name} captured ${event.siteId}`,
+        notation: event.siteId,
+      };
+    }
+    case "base-destroyed": {
+      const attacker = getFrontierParticipantForOwner(match, event.attackerOwner);
+      const defender = getFrontierParticipantForOwner(match, event.destroyedOwner);
+      return {
+        agentId: attacker.id,
+        actorName: attacker.name,
+        headline: `${attacker.name} destroyed ${defender.name}'s base`,
+        notation: `${attacker.name} eliminated ${defender.name}`,
+      };
+    }
+    case "match-ended": {
+      if (event.winner === "DRAW") {
+        return {
+          agentId: match.playerOneId,
+          actorName: null,
+          headline: `Match drawn by ${event.winnerReason.replaceAll("-", " ")}`,
+          notation: "Draw",
+        };
+      }
+
+      const winner = getFrontierParticipantForOwner(match, event.winner);
+      return {
+        agentId: winner.id,
+        actorName: winner.name,
+        headline: `${winner.name} won by ${event.winnerReason.replaceAll("-", " ")}`,
+        notation: winner.name,
+      };
+    }
   }
 }
 

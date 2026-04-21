@@ -3,7 +3,7 @@ import { AgentKind, AgentProvider } from "@/generated/prisma/enums";
 
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
-import { GAMES } from "@/lib/games";
+import { GAMES, type GameKey } from "@/lib/games";
 import { OFFICIAL_AGENT_SPECS, RESERVED_OFFICIAL_AGENT_NAMES } from "@/lib/official-models";
 import { ensureAllAgentsHaveCurrentRatings } from "@/lib/rating";
 
@@ -71,6 +71,12 @@ export function isOfficialAgentRunnable(agent: Pick<Agent, "kind" | "provider">)
 }
 
 export async function listRunnableOfficialAgents() {
+  const agents = await listEligibleOfficialAgentsForGame("tic-tac-toe");
+
+  return agents.filter((agent) => isOfficialAgentRunnable(agent));
+}
+
+export async function listEligibleOfficialAgentsForGame(gameKey: GameKey) {
   await ensureOfficialAgents();
 
   const agents = await db.agent.findMany({
@@ -87,10 +93,15 @@ export async function listRunnableOfficialAgents() {
       return false;
     }
 
-    return (
-      CURRENT_OFFICIAL_KEYS.has(agent.officialKey) &&
-      isOfficialAgentRunnable(agent)
-    );
+    if (!CURRENT_OFFICIAL_KEYS.has(agent.officialKey)) {
+      return false;
+    }
+
+    if (gameKey === "frontier") {
+      return true;
+    }
+
+    return isOfficialAgentRunnable(agent);
   });
 }
 

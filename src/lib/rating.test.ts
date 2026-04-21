@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_ELO, GAMES } from "@/lib/games";
 import { applyEloResult, computeAggregateRating, expectedScore } from "@/lib/rating";
 
 describe("rating helpers", () => {
@@ -23,6 +24,8 @@ describe("rating helpers", () => {
       { gameKey: "checkers", rating: 1160 },
     ]);
 
-    expect(aggregate).toBe((1280 + 1160 + 1200) / 3);
+    expect(aggregate).toBe(
+      (1280 + 1160 + DEFAULT_ELO * (GAMES.length - 2)) / GAMES.length,
+    );
   });
 });

@@ -26,6 +26,12 @@ import {
   type TicTacToeMark,
   type TicTacToeState,
 } from "@/lib/tic-tac-toe";
+import {
+  createInitialFrontierState,
+  parseFrontierState,
+  renderFrontierBoard,
+  type FrontierState,
+} from "@/lib/frontier";
 
 export type ReplayableMatch = Match & {
   playerOne: Agent;
@@ -60,6 +66,8 @@ export function buildMatchReplay(match: ReplayableMatch): MatchReplay {
         return buildCheckersReplay(match);
       case "chess":
         return buildChessReplay(match);
+      case "frontier":
+        return buildFrontierReplay(match);
       default:
         return {
           frames: [],
@@ -200,6 +208,58 @@ function buildChessReplay(match: ReplayableMatch): MatchReplay {
       frames,
       currentState: state,
       finalBoard: renderChessBoard(finalState),
+      finalWinner: finalState.winner,
+      finalWinnerReason: finalState.winnerReason,
+      terminalHeadline: describeTerminalHeadline(match, finalState.winnerReason),
+    }),
+    unavailableReason: null,
+  };
+}
+
+function buildFrontierReplay(match: ReplayableMatch): MatchReplay {
+  const initialState = createInitialFrontierState();
+  const frames: MatchReplayFrame[] = [
+    createReplayFrame({
+      index: 0,
+      board: renderFrontierBoard(initialState),
+      headline: "Initial position",
+    }),
+  ];
+
+  for (const move of match.moves) {
+    const payload = parseMovePayload(move.payloadJson);
+
+    if (getOptionalString(payload.kind) !== "frontier-frame") {
+      continue;
+    }
+
+    const board = getOptionalString(payload.board);
+    const headline = getOptionalString(payload.headline);
+
+    if (!board || !headline) {
+      throw new Error("Missing Frontier replay frame fields.");
+    }
+
+    frames.push(
+      createReplayFrame({
+        index: frames.length,
+        actorName: getOptionalString(payload.actorName) ?? getActorName(match, move.agentId),
+        board,
+        createdAt: getOptionalString(payload.createdAt),
+        headline,
+        notation: getOptionalString(payload.notation),
+        isTerminal: payload.isTerminal === true,
+      }),
+    );
+  }
+
+  const finalState = parseFrontierState(match.stateJson);
+
+  return {
+    frames: appendTerminalFrameIfNeeded<FrontierState>({
+      frames,
+      currentState: finalState,
+      finalBoard: renderFrontierBoard(finalState),
       finalWinner: finalState.winner,
       finalWinnerReason: finalState.winnerReason,
       terminalHeadline: describeTerminalHeadline(match, finalState.winnerReason),

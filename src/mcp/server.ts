@@ -38,6 +38,7 @@ import {
   ensureMatchTimeoutWorker,
   getCheckersMatchStateForAgent,
   getChessMatchStateForAgent,
+  getFrontierMatchStateForAgent,
   getTicTacToeMatchStateForAgent,
   listMatchesForAgent,
   playCheckersTurn,
@@ -45,6 +46,7 @@ import {
   playTicTacToeTurn,
   queueAgentForGame,
   serializeMatchForMcp,
+  submitFrontierOrdersForAgent,
   waitForTurnOrMatchEndForAgent,
 } from "@/lib/matches";
 import { getDisplayRating } from "@/lib/elo";
@@ -130,6 +132,103 @@ const waitForTurnOutputSchema = {
   timedOutWaiting: z.boolean(),
 };
 
+const frontierMoveActionSchema = z.object({
+  type: z.literal("MOVE"),
+  armyId: z.string().trim().min(1),
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(60),
+});
+
+const frontierAttackActionSchema = z.object({
+  type: z.literal("ATTACK"),
+  armyId: z.string().trim().min(1),
+  targetId: z.string().trim().min(1),
+});
+
+const frontierActionSchema = z.union([
+  frontierMoveActionSchema,
+  frontierAttackActionSchema,
+]);
+
+const frontierStateOutputSchema = {
+  matchId: z.string(),
+  gameKey: z.literal("frontier"),
+  status: z.string(),
+  youAre: z.enum(["ONE", "TWO"]),
+  yourLabel: z.string(),
+  opponentName: z.string(),
+  opponentLabel: z.string(),
+  board: z.string(),
+  currentWindowIndex: z.number().int().nonnegative(),
+  secondsUntilNextWindow: z.number().nonnegative(),
+  matchSecondsRemaining: z.number().int().nonnegative(),
+  nextWindowClosesAt: z.string().nullable(),
+  income: z.object({
+    ONE: z.number().nonnegative(),
+    TWO: z.number().nonnegative(),
+  }),
+  incomePerSecond: z.object({
+    ONE: z.number().nonnegative(),
+    TWO: z.number().nonnegative(),
+  }),
+  ownedArmies: z.array(
+    z.object({
+      id: z.string(),
+      soldiers: z.number().int().positive(),
+      x: z.number(),
+      y: z.number(),
+      order: z.object({
+        type: z.string(),
+      }).and(z.record(z.string(), z.unknown())),
+    }),
+  ),
+  enemyArmies: z.array(
+    z.object({
+      id: z.string(),
+      soldiers: z.number().int().positive(),
+      x: z.number(),
+      y: z.number(),
+      order: z.object({
+        type: z.string(),
+      }).and(z.record(z.string(), z.unknown())),
+    }),
+  ),
+  sites: z.array(
+    z.object({
+      id: z.string(),
+      x: z.number(),
+      y: z.number(),
+      controller: z.enum(["ONE", "TWO"]).nullable(),
+      captureOwner: z.enum(["ONE", "TWO"]).nullable(),
+      captureProgressMs: z.number().int().nonnegative(),
+    }),
+  ),
+  bases: z.array(
+    z.object({
+      id: z.string(),
+      owner: z.enum(["ONE", "TWO"]),
+      label: z.string(),
+      x: z.number(),
+      y: z.number(),
+      alive: z.boolean(),
+    }),
+  ),
+  pendingSubmission: z.object({
+    windowIndex: z.number().int().nonnegative(),
+    actions: z.array(frontierActionSchema),
+  }).nullable(),
+  winner: z.enum(["ONE", "TWO", "DRAW"]).nullable(),
+  winnerReason: z.string().nullable(),
+  rules: z.string(),
+  recommendedTool: z.literal("submit_frontier_orders"),
+};
+
+const frontierSubmissionOutputSchema = {
+  ...frontierStateOutputSchema,
+  acceptedActions: z.array(frontierActionSchema),
+  submissionWindowIndex: z.number().int().nonnegative(),
+};
+
 function toStructuredToolResult(structuredContent: Record<string, unknown>, text?: string) {
   return {
     content: [
@@ -150,6 +249,8 @@ function getLegalMovesToolName(gameKey: string) {
       return "get_checkers_legal_moves";
     case "chess":
       return "get_chess_legal_moves";
+    case "frontier":
+      return "get_frontier_state";
     default:
       return null;
   }
@@ -209,6 +310,59 @@ function formatTicTacToeStateText(payload: ReturnType<typeof serializeTicTacToeS
     `Legal moves: ${payload.legalMoves.map((move) => move.notation).join(", ") || "none"}`,
     `Seconds remaining on current turn: ${payload.secondsRemaining ?? "n/a"}`,
     `Winner: ${payload.winner ?? "pending"}`,
+    nextStep,
+  ].join("\n");
+}
+
+function serializeFrontierStateForTool(
+  state: Awaited<ReturnType<typeof getFrontierMatchStateForAgent>>,
+  agentId: string,
+) {
+  const opponentName =
+    state.match.playerOneId === agentId
+      ? state.match.playerTwo?.name ?? "unknown"
+      : state.match.playerOne.name;
+
+  return {
+    matchId: state.match.id,
+    gameKey: "frontier" as const,
+    status: state.match.status,
+    youAre: state.youAre,
+    yourLabel: state.yourLabel,
+    opponentName,
+    opponentLabel: state.opponentLabel,
+    board: state.board,
+    currentWindowIndex: state.currentWindowIndex,
+    secondsUntilNextWindow: state.secondsUntilNextWindow,
+    matchSecondsRemaining: state.matchSecondsRemaining,
+    nextWindowClosesAt: state.nextWindowClosesAt,
+    income: state.income,
+    incomePerSecond: state.incomePerSecond,
+    ownedArmies: state.ownedArmies,
+    enemyArmies: state.enemyArmies,
+    sites: state.sites,
+    bases: state.bases,
+    pendingSubmission: state.pendingSubmission,
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    rules: state.rules,
+    recommendedTool: "submit_frontier_orders" as const,
+  };
+}
+
+function formatFrontierStateText(payload: ReturnType<typeof serializeFrontierStateForTool>) {
+  const nextStep =
+    payload.status === "ACTIVE"
+      ? "If you want to change orders for the next window, call submit_frontier_orders."
+      : `Winner: ${payload.winner ?? "pending"}`;
+
+  return [
+    `Match ${payload.matchId}`,
+    `${payload.yourLabel} vs ${payload.opponentName} (${payload.opponentLabel})`,
+    payload.board,
+    `Window ${payload.currentWindowIndex} closes in ${payload.secondsUntilNextWindow}s`,
+    `Match time remaining: ${payload.matchSecondsRemaining}s`,
+    `Pending submission: ${payload.pendingSubmission ? "yes" : "no"}`,
     nextStep,
   ].join("\n");
 }
@@ -346,7 +500,7 @@ function getServer(agent: NonNullable<AuthenticatedRequest["agent"]>) {
     "wait_for_turn_or_match_end",
     {
       description:
-        "Block on a live match until it becomes your turn, the match finishes, or the wait window expires. Use this instead of manual polling so you do not miss the 30-second move deadline.",
+        "Block on a live match until it becomes your turn, a real-time match advances, the match finishes, or the wait window expires. Use this instead of manual polling so you do not miss move deadlines or window updates.",
       inputSchema: {
         matchId: z.string().trim().min(1).describe("The active match to watch."),
         maxWaitSeconds: z
@@ -397,6 +551,27 @@ function getServer(agent: NonNullable<AuthenticatedRequest["agent"]>) {
       const payload = serializeTicTacToeStateForTool(state, agent.id);
 
       return toStructuredToolResult(payload, formatTicTacToeStateText(payload));
+    },
+  );
+
+  server.registerTool(
+    "get_frontier_state",
+    {
+      description:
+        "Return the current Frontier match state, map control, armies, pending orders, and command-window timing for the authenticated agent. Frontier is real-time with 4-second order windows; orders persist until replaced.",
+      inputSchema: {
+        matchId: z.string().trim().min(1).describe("The live Frontier match to inspect."),
+      },
+      outputSchema: frontierStateOutputSchema,
+    },
+    async ({ matchId }) => {
+      const state = await getFrontierMatchStateForAgent({
+        agentId: agent.id,
+        matchId,
+      });
+      const payload = serializeFrontierStateForTool(state, agent.id);
+
+      return toStructuredToolResult(payload, formatFrontierStateText(payload));
     },
   );
 
@@ -503,6 +678,40 @@ function getServer(agent: NonNullable<AuthenticatedRequest["agent"]>) {
   );
 
   server.registerTool(
+    "submit_frontier_orders",
+    {
+      description:
+        "Submit the latest Frontier command bundle for the current 4-second window. Only the latest valid submission before the window closes is applied, and existing orders persist until replaced. Use structured JSON actions with either MOVE or ATTACK.",
+      inputSchema: {
+        matchId: z.string().trim().min(1).describe("The live Frontier match to control."),
+        actions: z
+          .array(frontierActionSchema)
+          .min(1)
+          .max(32)
+          .describe("A structured list of Frontier MOVE or ATTACK actions."),
+      },
+      outputSchema: frontierSubmissionOutputSchema,
+    },
+    async ({ matchId, actions }) => {
+      const result = await submitFrontierOrdersForAgent({
+        agentId: agent.id,
+        matchId,
+        actions,
+      });
+      const payload = {
+        ...serializeFrontierStateForTool(result, agent.id),
+        acceptedActions: result.acceptedActions,
+        submissionWindowIndex: result.submissionWindowIndex,
+      };
+
+      return toStructuredToolResult(
+        payload,
+        `Queued ${payload.acceptedActions.length} Frontier actions for window ${payload.submissionWindowIndex}.\n${formatFrontierStateText(payload)}`,
+      );
+    },
+  );
+
+  server.registerTool(
     "play_chess_move",
     {
       description:
@@ -601,6 +810,10 @@ function getServer(agent: NonNullable<AuthenticatedRequest["agent"]>) {
 }
 
 function formatMatchupLine(gameKey: string, playerOneName: string, playerTwoName: string) {
+  if (gameKey === "frontier") {
+    return `${playerOneName} controls West, ${playerTwoName} controls East.`;
+  }
+
   if (gameKey === "checkers") {
     return `${playerOneName} is Red, ${playerTwoName} is Black.`;
   }

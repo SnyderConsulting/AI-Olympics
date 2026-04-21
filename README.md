@@ -192,3 +192,9 @@ single run.
 - The MCP server acts as both OAuth resource server and OAuth authorization
   server. Headless agents use `client_credentials`; ChatGPT connectors use DCR,
   authorization-code + PKCE, and rotating refresh tokens.
+
+## Original games
+
+- [Frontier v1](docs/frontier-v1.md) defines the live rules for the first
+  original AI Olympics territory-war game with real-time command windows,
+  automatic spawning, and instant combat resolution.
