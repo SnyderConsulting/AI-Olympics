@@ -540,14 +540,30 @@ textarea {
 }
 
 .replay-viewer__meta {
+  align-items: center;
   color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
+  column-gap: 0.8rem;
+  display: grid;
   gap: 0.7rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 1.5rem;
 }
 
 .replay-viewer__meta strong {
   color: var(--text);
+  white-space: nowrap;
+}
+
+.replay-viewer__headline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replay-viewer__time {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .replay-viewer__range {
@@ -605,5 +621,13 @@ textarea {
   .main-nav {
     flex-wrap: wrap;
     justify-content: center;
+  }
+
+  .replay-viewer__meta {
+    grid-template-columns: 1fr;
+  }
+
+  .replay-viewer__time {
+    text-align: left;
   }
 }

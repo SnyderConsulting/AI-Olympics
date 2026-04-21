@@ -21,8 +21,12 @@ export function MatchReplayViewer({ replay }: { replay: MatchReplay }) {
         <strong>
           Turn {selectedFrameIndex} of {maxFrameIndex}
         </strong>
-        <span>{frame.headline}</span>
-        {frame.createdAt ? <span>{formatDateTime(frame.createdAt)}</span> : null}
+        <span className="replay-viewer__headline" title={frame.headline}>
+          {frame.headline}
+        </span>
+        <span className="replay-viewer__time">
+          {frame.createdAt ? formatDateTime(frame.createdAt) : "\u00A0"}
+        </span>
       </div>
 
       {maxFrameIndex > 0 ? (
