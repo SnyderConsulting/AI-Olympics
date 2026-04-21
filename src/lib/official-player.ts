@@ -14,6 +14,17 @@ import {
   type ChessState,
 } from "@/lib/chess";
 import { env } from "@/lib/env";
+import {
+  FRONTIER_COMMAND_WINDOW_MS,
+  FRONTIER_MAP_HEIGHT,
+  FRONTIER_MAP_WIDTH,
+  FRONTIER_RULES_TEXT,
+  getFrontierOpponent,
+  getFrontierOwnerLabel,
+  type FrontierAction,
+  type FrontierOwner,
+  type FrontierState,
+} from "@/lib/frontier";
 import { parseStructuredMoveNotation } from "@/lib/move-notation";
 import {
   parseTicTacToeMoveNotation,
@@ -23,8 +34,13 @@ import {
 
 const REQUEST_TIMEOUT_MS = env.MATCH_MOVE_TIMEOUT_SECONDS * 1000;
 const MAX_MOVE_OUTPUT_TOKENS = 256;
+const MAX_FRONTIER_OUTPUT_TOKENS = 768;
 const MAX_PROVIDER_RETRIES = 2;
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const FRONTIER_REQUEST_TIMEOUT_MS = Math.max(
+  1_000,
+  Math.min(REQUEST_TIMEOUT_MS, FRONTIER_COMMAND_WINDOW_MS - 500),
+);
 
 type OpenAiReasoningEffort = "minimal" | "low";
 
@@ -95,6 +111,82 @@ export async function chooseOfficialChessMove(args: {
   });
 
   return parseChessMoveNotation(notation, args.legalMoves, args.state);
+}
+
+export async function chooseOfficialFrontierActions(args: {
+  provider: AgentProvider;
+  modelId: string;
+  state: FrontierState;
+  owner: FrontierOwner;
+  board: string;
+  currentWindowIndex: number;
+  secondsUntilNextWindow: number;
+  matchSecondsRemaining: number;
+}) {
+  const ownedArmies = args.state.armies.filter((army) => army.owner === args.owner);
+
+  if (ownedArmies.length === 0) {
+    return [];
+  }
+
+  const opponent = getFrontierOpponent(args.owner);
+  const enemyBase = args.state.bases.find((base) => base.owner === opponent && base.alive);
+  const attackTargetIds = [
+    ...args.state.armies
+      .filter((army) => army.owner === opponent)
+      .map((army) => army.id),
+    ...args.state.sites.map((site) => site.id),
+    ...(enemyBase ? [enemyBase.id] : []),
+  ];
+  const systemPrompt =
+    `Play Frontier as ${getFrontierOwnerLabel(args.owner)}. ` +
+    "Decide your own strategy from the live state. " +
+    "Return only a JSON object matching the provided schema. " +
+    "You may return zero or more actions, but at most one action per owned army. " +
+    "Omitted armies keep their current order. " +
+    "For MOVE actions, set targetId to null. For ATTACK actions, set x and y to null. " +
+    "If your armies are idle and the match is active, usually issue at least one action instead of returning an empty bundle. " +
+    `Rules: ${FRONTIER_RULES_TEXT}`;
+  const ownedArmyIds = ownedArmies.map((army) => army.id);
+  const requestActions = async (userPrompt: string) => {
+    const raw =
+      args.provider === AgentProvider.OPENAI
+        ? await requestOpenAiFrontierActions({
+            modelId: args.modelId,
+            systemPrompt,
+            userPrompt,
+            ownedArmyIds,
+            attackTargetIds,
+          })
+        : await requestGoogleFrontierActions({
+            modelId: args.modelId,
+            systemPrompt,
+            userPrompt,
+            ownedArmyIds,
+            attackTargetIds,
+          });
+
+    return parseFrontierActionsResponse(raw, {
+      ownedArmyIds,
+      attackTargetIds,
+    });
+  };
+
+  const firstAttempt = await requestActions(buildFrontierUserPrompt(args));
+
+  if (
+    firstAttempt.length === 0 &&
+    args.state.winner === null &&
+    ownedArmies.some((army) => army.order.type === "IDLE")
+  ) {
+    return requestActions(
+      `${buildFrontierUserPrompt(args)}\n\n` +
+      "Your prior draft returned no actions while at least one of your armies is idle. " +
+      "Submit at least one valid action now unless every army should deliberately continue its exact current order.",
+    );
+  }
+
+  return firstAttempt;
 }
 
 export function getOpenAiReasoningEffort(modelId: string): OpenAiReasoningEffort | null {
@@ -206,6 +298,82 @@ async function requestOpenAiMoveNotation(args: {
   throw new Error(`OpenAI request retries exhausted for ${args.modelId}.`);
 }
 
+async function requestOpenAiFrontierActions(args: {
+  modelId: string;
+  systemPrompt: string;
+  userPrompt: string;
+  ownedArmyIds: string[];
+  attackTargetIds: string[];
+}) {
+  if (!env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not configured.");
+  }
+
+  for (let attempt = 0; attempt <= MAX_PROVIDER_RETRIES; attempt += 1) {
+    const response = await fetchWithTimeout(
+      "https://api.openai.com/v1/responses",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: args.modelId,
+          instructions: args.systemPrompt,
+          input: args.userPrompt,
+          max_output_tokens: MAX_FRONTIER_OUTPUT_TOKENS,
+          text: {
+            format: {
+              type: "json_schema",
+              name: "frontier_action_bundle",
+              strict: true,
+              schema: createOpenAiFrontierActionSchema(args.ownedArmyIds, args.attackTargetIds),
+            },
+          },
+          ...(getOpenAiReasoningEffort(args.modelId)
+            ? {
+                reasoning: {
+                  effort: getOpenAiReasoningEffort(args.modelId),
+                },
+              }
+            : {}),
+        }),
+      },
+      FRONTIER_REQUEST_TIMEOUT_MS,
+    );
+
+    const payload = (await response.json()) as {
+      output_text?: string;
+      output?: Array<{
+        type?: string;
+        content?: Array<{
+          type?: string;
+          text?: string;
+        }>;
+      }>;
+      error?: {
+        message?: string;
+      };
+    };
+
+    if (!response.ok) {
+      if (attempt < MAX_PROVIDER_RETRIES && RETRYABLE_STATUS_CODES.has(response.status)) {
+        await sleep(getRetryDelayMs(attempt));
+        continue;
+      }
+
+      throw new Error(
+        payload.error?.message ?? `OpenAI request failed with ${response.status}.`,
+      );
+    }
+
+    return extractOpenAiText(payload);
+  }
+
+  throw new Error(`OpenAI request retries exhausted for ${args.modelId}.`);
+}
+
 async function requestGoogleMoveNotation(args: {
   modelId: string;
   systemPrompt: string;
@@ -279,9 +447,84 @@ async function requestGoogleMoveNotation(args: {
   throw new Error(`Google request retries exhausted for ${args.modelId}.`);
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit) {
+async function requestGoogleFrontierActions(args: {
+  modelId: string;
+  systemPrompt: string;
+  userPrompt: string;
+  ownedArmyIds: string[];
+  attackTargetIds: string[];
+}) {
+  if (!env.GOOGLE_API_KEY) {
+    throw new Error("GOOGLE_API_KEY is not configured.");
+  }
+
+  for (let attempt = 0; attempt <= MAX_PROVIDER_RETRIES; attempt += 1) {
+    const response = await fetchWithTimeout(
+      `https://generativelanguage.googleapis.com/v1beta/${args.modelId}:generateContent?key=${encodeURIComponent(env.GOOGLE_API_KEY)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: args.systemPrompt }],
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: args.userPrompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: MAX_FRONTIER_OUTPUT_TOKENS,
+            responseMimeType: "application/json",
+            responseSchema: createGoogleFrontierActionSchema(args.ownedArmyIds, args.attackTargetIds),
+            thinkingConfig: getGoogleThinkingConfig(args.modelId),
+          },
+        }),
+      },
+      FRONTIER_REQUEST_TIMEOUT_MS,
+    );
+
+    const payload = (await response.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{
+            text?: string;
+          }>;
+        };
+      }>;
+      error?: {
+        message?: string;
+      };
+    };
+
+    if (!response.ok) {
+      if (attempt < MAX_PROVIDER_RETRIES && RETRYABLE_STATUS_CODES.has(response.status)) {
+        await sleep(getRetryDelayMs(attempt));
+        continue;
+      }
+
+      throw new Error(
+        payload.error?.message ?? `Google request failed with ${response.status}.`,
+      );
+    }
+
+    return (
+      payload.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text ?? "")
+        .join("") ?? ""
+    );
+  }
+
+  throw new Error(`Google request retries exhausted for ${args.modelId}.`);
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await fetch(url, {
@@ -347,6 +590,246 @@ function createGoogleMoveSelectionSchema(legalMoveNotations: string[]) {
     },
     required: ["notation"],
   };
+}
+
+function createOpenAiFrontierActionSchema(ownedArmyIds: string[], attackTargetIds: string[]) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      actions: {
+        type: "array",
+        description: "Zero or more orders to replace current orders for owned armies.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            type: {
+              type: "string",
+              enum: ["MOVE", "ATTACK"],
+            },
+            armyId: {
+              type: "string",
+              enum: ownedArmyIds,
+            },
+            x: {
+              anyOf: [
+                {
+                  type: "number",
+                  minimum: 0,
+                  maximum: FRONTIER_MAP_WIDTH,
+                },
+                {
+                  type: "null",
+                },
+              ],
+            },
+            y: {
+              anyOf: [
+                {
+                  type: "number",
+                  minimum: 0,
+                  maximum: FRONTIER_MAP_HEIGHT,
+                },
+                {
+                  type: "null",
+                },
+              ],
+            },
+            targetId: {
+              anyOf: [
+                {
+                  type: "string",
+                  enum: attackTargetIds,
+                },
+                {
+                  type: "null",
+                },
+              ],
+            },
+          },
+          required: ["type", "armyId", "x", "y", "targetId"],
+        },
+      },
+    },
+    required: ["actions"],
+  };
+}
+
+function createGoogleFrontierActionSchema(ownedArmyIds: string[], attackTargetIds: string[]) {
+  return {
+    type: "OBJECT",
+    properties: {
+      actions: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            type: {
+              type: "STRING",
+              enum: ["MOVE", "ATTACK"],
+            },
+            armyId: {
+              type: "STRING",
+              enum: ownedArmyIds,
+            },
+            x: {
+              type: "NUMBER",
+              minimum: 0,
+              maximum: FRONTIER_MAP_WIDTH,
+            },
+            y: {
+              type: "NUMBER",
+              minimum: 0,
+              maximum: FRONTIER_MAP_HEIGHT,
+            },
+            targetId: {
+              type: "STRING",
+              enum: attackTargetIds,
+            },
+          },
+          required: ["type", "armyId"],
+        },
+      },
+    },
+    required: ["actions"],
+  };
+}
+
+function buildFrontierUserPrompt(args: {
+  state: FrontierState;
+  owner: FrontierOwner;
+  board: string;
+  currentWindowIndex: number;
+  secondsUntilNextWindow: number;
+  matchSecondsRemaining: number;
+}) {
+  const opponent = getFrontierOpponent(args.owner);
+  const ownArmies = args.state.armies
+    .filter((army) => army.owner === args.owner)
+    .map(serializeFrontierArmyForPrompt);
+  const enemyArmies = args.state.armies
+    .filter((army) => army.owner === opponent)
+    .map(serializeFrontierArmyForPrompt);
+  const sites = args.state.sites.map((site) => ({
+    id: site.id,
+    x: site.x,
+    y: site.y,
+    controller: site.controller,
+    captureOwner: site.captureOwner,
+    captureProgressMs: site.captureProgressMs,
+  }));
+  const bases = args.state.bases.map((base) => ({
+    id: base.id,
+    owner: base.owner,
+    label: getFrontierOwnerLabel(base.owner),
+    x: base.x,
+    y: base.y,
+    alive: base.alive,
+  }));
+
+  return [
+    `Window ${args.currentWindowIndex + 1} closes in ${args.secondsUntilNextWindow.toFixed(2)} seconds.`,
+    `Match time remaining: ${args.matchSecondsRemaining} seconds.`,
+    `You are ${getFrontierOwnerLabel(args.owner)}.`,
+    "",
+    `Board summary:`,
+    args.board,
+    "",
+    `Your armies:`,
+    JSON.stringify(ownArmies, null, 2),
+    "",
+    `Enemy armies:`,
+    JSON.stringify(enemyArmies, null, 2),
+    "",
+    `Sites:`,
+    JSON.stringify(sites, null, 2),
+    "",
+    `Bases:`,
+    JSON.stringify(bases, null, 2),
+  ].join("\n");
+}
+
+function serializeFrontierArmyForPrompt(army: FrontierState["armies"][number]) {
+  return {
+    id: army.id,
+    soldiers: army.soldiers,
+    x: army.x,
+    y: army.y,
+    order: army.order,
+  };
+}
+
+function parseFrontierActionsResponse(
+  raw: string,
+  args: {
+    ownedArmyIds: string[];
+    attackTargetIds: string[];
+  },
+) {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Model output was not valid JSON.");
+  }
+
+  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { actions?: unknown[] }).actions)) {
+    throw new Error("Model output was missing an actions array.");
+  }
+
+  const validArmyIds = new Set(args.ownedArmyIds);
+  const validTargets = new Set(args.attackTargetIds);
+  const deduped = new Map<string, FrontierAction>();
+
+  for (const item of (parsed as { actions: unknown[] }).actions) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const action = item as Partial<FrontierAction> & {
+      x?: unknown;
+      y?: unknown;
+      targetId?: unknown;
+    };
+
+    if (!action.armyId || typeof action.armyId !== "string" || !validArmyIds.has(action.armyId)) {
+      continue;
+    }
+
+    if (
+      action.type === "MOVE" &&
+      typeof action.x === "number" &&
+      typeof action.y === "number" &&
+      action.x >= 0 &&
+      action.x <= FRONTIER_MAP_WIDTH &&
+      action.y >= 0 &&
+      action.y <= FRONTIER_MAP_HEIGHT
+    ) {
+      deduped.set(action.armyId, {
+        type: "MOVE",
+        armyId: action.armyId,
+        x: action.x,
+        y: action.y,
+      });
+      continue;
+    }
+
+    if (
+      action.type === "ATTACK" &&
+      typeof action.targetId === "string" &&
+      validTargets.has(action.targetId)
+    ) {
+      deduped.set(action.armyId, {
+        type: "ATTACK",
+        armyId: action.armyId,
+        targetId: action.targetId,
+      });
+    }
+  }
+
+  return [...deduped.values()];
 }
 
 function compactPromptBoard(board: string) {

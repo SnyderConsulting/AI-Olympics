@@ -62,7 +62,7 @@ Neutral resource sites:
 
 Suggested combat values:
 
-- `base_defense = 40`
+- `base_defense = 8`
 - `base_bonus = 1.25`
 
 ### Resource site

@@ -13,7 +13,7 @@ export const FRONTIER_ARMY_SPEED = 6;
 export const FRONTIER_MERGE_DISTANCE = 1;
 export const FRONTIER_ENGAGE_DISTANCE = 1.5;
 export const FRONTIER_ATTACKER_BONUS = 1.15;
-export const FRONTIER_BASE_DEFENSE = 40;
+export const FRONTIER_BASE_DEFENSE = 8;
 export const FRONTIER_BASE_BONUS = 1.25;
 
 export type FrontierOwner = "ONE" | "TWO";
@@ -175,7 +175,7 @@ const FRONTIER_SITES: Array<{ id: string; x: number; y: number }> = [
 const PREVIEW_ARMY_LIMIT = 4;
 
 export const FRONTIER_RULES_TEXT =
-  "Frontier is a simple real-time territory war game. Each side has one base, armies of soldiers, and resource sites on an open map. Bases always generate baseline income, controlled sites add more income, and soldiers spawn automatically at the base whenever enough income accrues. Agents only issue MOVE and ATTACK orders to whole army stacks. Orders persist until replaced. Combat resolves immediately and automatically when armies engage. The attacker gains a modest advantage unless both sides committed to the fight in the same command window. Win by destroying the enemy base, or if time expires by having more soldiers remaining, then more controlled sites.";
+  "Frontier is a simple real-time territory war game. Each side has one base, armies of soldiers, and resource sites on an open map. Bases always generate baseline income, controlled sites add more income, and soldiers spawn automatically at the base whenever enough income accrues. Agents only issue MOVE and ATTACK orders to whole army stacks. Orders persist until replaced. Combat resolves immediately and automatically when armies engage. The attacker gains a modest advantage unless both sides committed to the fight in the same command window. Bases are intentionally fragile enough that a territorial lead can convert into a real base kill. Win by destroying the enemy base, or if time expires by having more soldiers remaining, then more controlled sites.";
 
 export function createInitialFrontierState(): FrontierState {
   return {
@@ -473,55 +473,6 @@ export function tickFrontierState(
     state: nextState,
     events,
   };
-}
-
-export function chooseOfficialFrontierActions(state: FrontierState, owner: FrontierOwner) {
-  const armies = state.armies.filter((army) => army.owner === owner);
-  const enemyOwner = getFrontierOpponent(owner);
-  const enemyBase = getFrontierBase(state, enemyOwner);
-  const enemyArmies = state.armies.filter((army) => army.owner === enemyOwner);
-  const contestedSites = state.sites.filter((site) => site.controller !== owner);
-
-  return armies.map<FrontierAction>((army) => {
-    if (enemyBase.alive && army.soldiers >= 20 && distance(army, enemyBase) <= 24) {
-      return {
-        type: "ATTACK",
-        armyId: army.id,
-        targetId: enemyBase.id,
-      };
-    }
-
-    const weakestEnemy = enemyArmies
-      .filter((enemyArmy) => enemyArmy.soldiers <= army.soldiers + 2)
-      .sort((left, right) => {
-        return distance(army, left) - distance(army, right) || left.soldiers - right.soldiers;
-      })[0];
-
-    if (weakestEnemy) {
-      return {
-        type: "ATTACK",
-        armyId: army.id,
-        targetId: weakestEnemy.id,
-      };
-    }
-
-    const nearestSite = contestedSites
-      .sort((left, right) => distance(army, left) - distance(army, right))[0];
-
-    if (nearestSite) {
-      return {
-        type: "ATTACK",
-        armyId: army.id,
-        targetId: nearestSite.id,
-      };
-    }
-
-    return {
-      type: "ATTACK",
-      armyId: army.id,
-      targetId: enemyBase.id,
-    };
-  });
 }
 
 function accrueFrontierIncome(

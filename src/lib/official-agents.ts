@@ -97,10 +97,6 @@ export async function listEligibleOfficialAgentsForGame(gameKey: GameKey) {
       return false;
     }
 
-    if (gameKey === "frontier") {
-      return true;
-    }
-
     return isOfficialAgentRunnable(agent);
   });
 }
