@@ -29,6 +29,7 @@ import { env } from "@/lib/env";
 import {
   applyFrontierCommandActions,
   chooseOfficialFrontierActions,
+  createFrontierReplayVisual,
   FRONTIER_COMMAND_WINDOW_MS,
   FRONTIER_MATCH_DURATION_MS,
   FRONTIER_RULES_TEXT,
@@ -1578,12 +1579,13 @@ async function advanceFrontierMatchToNowInTransaction(
         match,
         moveRows,
         nextMoveIndex,
-        agentId: match.playerOneId,
-        actorName: null,
-        board: renderFrontierBoard(state),
-        headline: `Window ${currentWindowIndex + 1} orders applied`,
-        notation: orderResult.summary,
-        createdAt: frontierReplayTimestamp(match, state),
+      agentId: match.playerOneId,
+      actorName: null,
+      state,
+      board: renderFrontierBoard(state),
+      headline: `Window ${currentWindowIndex + 1} orders applied`,
+      notation: orderResult.summary,
+      createdAt: frontierReplayTimestamp(match, state),
       });
     }
   }
@@ -1694,6 +1696,7 @@ function appendFrontierEventRows(args: {
       nextMoveIndex,
       agentId: frontierFrame.agentId,
       actorName: frontierFrame.actorName,
+      state: args.state,
       board: renderFrontierBoard(args.state),
       headline: frontierFrame.headline,
       notation: frontierFrame.notation,
@@ -1711,6 +1714,7 @@ function appendFrontierFrameRow(args: {
   nextMoveIndex: number;
   agentId: string;
   actorName: string | null;
+  state: FrontierState;
   board: string;
   headline: string;
   notation: string | null;
@@ -1729,6 +1733,7 @@ function appendFrontierFrameRow(args: {
       notation: args.notation,
       createdAt: args.createdAt,
       isTerminal: args.isTerminal ?? false,
+      visual: createFrontierReplayVisual(args.state),
     }),
   });
 

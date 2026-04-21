@@ -27,9 +27,12 @@ import {
   type TicTacToeState,
 } from "@/lib/tic-tac-toe";
 import {
+  createFrontierReplayVisual,
   createInitialFrontierState,
+  parseFrontierReplayVisual,
   parseFrontierState,
   renderFrontierBoard,
+  type FrontierReplayVisual,
   type FrontierState,
 } from "@/lib/frontier";
 
@@ -48,6 +51,7 @@ export type MatchReplayFrame = {
   actorName: string | null;
   createdAt: string | null;
   isTerminal: boolean;
+  visual: FrontierReplayVisual | null;
 };
 
 export type MatchReplay = {
@@ -223,6 +227,7 @@ function buildFrontierReplay(match: ReplayableMatch): MatchReplay {
       index: 0,
       board: renderFrontierBoard(initialState),
       headline: "Initial position",
+      visual: createFrontierReplayVisual(initialState),
     }),
   ];
 
@@ -249,6 +254,7 @@ function buildFrontierReplay(match: ReplayableMatch): MatchReplay {
         headline,
         notation: getOptionalString(payload.notation),
         isTerminal: payload.isTerminal === true,
+        visual: parseFrontierReplayVisual(payload.visual),
       }),
     );
   }
@@ -263,6 +269,7 @@ function buildFrontierReplay(match: ReplayableMatch): MatchReplay {
       finalWinner: finalState.winner,
       finalWinnerReason: finalState.winnerReason,
       terminalHeadline: describeTerminalHeadline(match, finalState.winnerReason),
+      finalVisual: createFrontierReplayVisual(finalState),
     }),
     unavailableReason: null,
   };
@@ -275,6 +282,7 @@ function appendTerminalFrameIfNeeded<TState extends { winner: string | null; win
   finalWinner: string | null;
   finalWinnerReason: string | null;
   terminalHeadline: string;
+  finalVisual?: FrontierReplayVisual | null;
 }) {
   if (
     args.frames.length > 0 &&
@@ -291,6 +299,7 @@ function appendTerminalFrameIfNeeded<TState extends { winner: string | null; win
       board: args.finalBoard,
       headline: args.terminalHeadline,
       isTerminal: true,
+      visual: args.finalVisual ?? null,
     }),
   );
 }
@@ -303,6 +312,7 @@ function createReplayFrame(args: {
   actorName?: string | null;
   createdAt?: string | null;
   isTerminal?: boolean;
+  visual?: FrontierReplayVisual | null;
 }): MatchReplayFrame {
   return {
     index: args.index,
@@ -312,6 +322,7 @@ function createReplayFrame(args: {
     actorName: args.actorName ?? null,
     createdAt: args.createdAt ?? null,
     isTerminal: args.isTerminal ?? false,
+    visual: args.visual ?? null,
   };
 }
 

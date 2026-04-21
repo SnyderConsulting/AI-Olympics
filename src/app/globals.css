@@ -539,6 +539,181 @@ textarea {
   padding: 0.95rem;
 }
 
+.frontier-map {
+  min-width: 0;
+}
+
+.frontier-map__summary {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.frontier-map__summary-card {
+  background: rgba(255, 248, 238, 0.84);
+  border: 1px solid rgba(28, 24, 19, 0.1);
+  border-radius: 16px;
+  display: grid;
+  gap: 0.15rem;
+  min-height: 4.4rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.frontier-map__summary-card strong {
+  color: var(--text);
+}
+
+.frontier-map__summary-card span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.frontier-map__summary-card--west {
+  background: linear-gradient(180deg, rgba(198, 74, 31, 0.16), rgba(255, 248, 238, 0.88));
+}
+
+.frontier-map__summary-card--east {
+  background: linear-gradient(180deg, rgba(29, 109, 103, 0.18), rgba(255, 248, 238, 0.88));
+  text-align: right;
+}
+
+.frontier-map__summary-card--clock {
+  place-items: center;
+  text-align: center;
+}
+
+.frontier-map__surface {
+  aspect-ratio: 5 / 3;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.24), transparent 30%),
+    linear-gradient(180deg, rgba(29, 109, 103, 0.08), rgba(198, 74, 31, 0.08)),
+    linear-gradient(rgba(28, 24, 19, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(28, 24, 19, 0.08) 1px, transparent 1px),
+    linear-gradient(180deg, #efe7d8, #e7decc);
+  background-size: auto, auto, 10% 10%, 10% 10%, auto;
+  border: 1px solid rgba(28, 24, 19, 0.12);
+  border-radius: 20px;
+  min-height: 17rem;
+  overflow: hidden;
+  position: relative;
+}
+
+.frontier-map__vectors {
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
+
+.frontier-map__vector {
+  fill: none;
+  opacity: 0.45;
+  stroke-dasharray: 2 1.6;
+  stroke-linecap: round;
+  stroke-width: 0.45;
+}
+
+.frontier-map__vector--west {
+  stroke: rgba(198, 74, 31, 0.9);
+}
+
+.frontier-map__vector--east {
+  stroke: rgba(29, 109, 103, 0.9);
+}
+
+.frontier-map__site,
+.frontier-map__base,
+.frontier-map__army {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.frontier-map__site {
+  align-items: center;
+  backdrop-filter: blur(4px);
+  border: 2px solid rgba(28, 24, 19, 0.18);
+  border-radius: 999px;
+  box-shadow: 0 6px 14px rgba(80, 54, 19, 0.12);
+  display: inline-flex;
+  height: 2.1rem;
+  justify-content: center;
+  width: 2.1rem;
+  z-index: 2;
+}
+
+.frontier-map__site span {
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.frontier-map__site--neutral {
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.frontier-map__site--west {
+  background: rgba(198, 74, 31, 0.25);
+  border-color: rgba(198, 74, 31, 0.5);
+}
+
+.frontier-map__site--east {
+  background: rgba(29, 109, 103, 0.26);
+  border-color: rgba(29, 109, 103, 0.5);
+}
+
+.frontier-map__base {
+  align-items: center;
+  border: 2px solid rgba(28, 24, 19, 0.22);
+  border-radius: 18px;
+  box-shadow: 0 10px 18px rgba(80, 54, 19, 0.14);
+  color: var(--text);
+  display: inline-flex;
+  font-size: 0.83rem;
+  font-weight: 700;
+  height: 3rem;
+  justify-content: center;
+  min-width: 4.75rem;
+  padding: 0 0.85rem;
+  z-index: 3;
+}
+
+.frontier-map__base--west {
+  background: rgba(198, 74, 31, 0.28);
+}
+
+.frontier-map__base--east {
+  background: rgba(29, 109, 103, 0.28);
+}
+
+.frontier-map__base--destroyed {
+  filter: grayscale(1);
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.frontier-map__army {
+  align-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 8px 16px rgba(28, 24, 19, 0.16);
+  color: white;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  height: 2rem;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0 0.45rem;
+  z-index: 4;
+}
+
+.frontier-map__army--west {
+  background: linear-gradient(135deg, #d95d30, #8e2d10);
+}
+
+.frontier-map__army--east {
+  background: linear-gradient(135deg, #2f8a83, #1b5f5a);
+}
+
 .replay-viewer__meta {
   align-items: center;
   color: var(--muted);
@@ -683,6 +858,14 @@ textarea {
   }
 
   .replay-viewer__time {
+    text-align: left;
+  }
+
+  .frontier-map__summary {
+    grid-template-columns: 1fr;
+  }
+
+  .frontier-map__summary-card--east {
     text-align: left;
   }
 }

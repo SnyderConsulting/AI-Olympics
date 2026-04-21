@@ -2,6 +2,11 @@ import { AgentKind, MatchResult, MatchStatus } from "@/generated/prisma/enums";
 
 import { buildMatchReplay, type ReplayableMatch } from "@/lib/match-replay";
 import {
+  createFrontierReplayVisual,
+  createInitialFrontierState,
+  serializeFrontierState,
+} from "@/lib/frontier";
+import {
   applyTicTacToeForfeit,
   applyTicTacToeMove,
   createInitialTicTacToeState,
@@ -98,6 +103,32 @@ describe("buildMatchReplay", () => {
     expect(replay.frames).toHaveLength(3);
     expect(replay.frames[2]?.isTerminal).toBe(true);
     expect(replay.frames[2]?.headline).toContain("timeout");
+  });
+
+  it("attaches structured visual data for frontier replay frames", () => {
+    const state = createInitialFrontierState();
+    state.sites[0]!.controller = "ONE";
+
+    const replay = buildMatchReplay(
+      createReplayableMatch({
+        gameKey: "frontier",
+        stateJson: serializeFrontierState(state),
+        moves: [
+          createMove(0, playerOne.id, {
+            kind: "frontier-frame",
+            board: "frontier frame",
+            headline: "West captured site_1",
+            createdAt: "2026-04-21T12:01:00.000Z",
+            visual: createFrontierReplayVisual(state),
+          }),
+        ],
+      }),
+    );
+
+    expect(replay.unavailableReason).toBeNull();
+    expect(replay.frames[0]?.visual?.kind).toBe("frontier");
+    expect(replay.frames[1]?.visual?.kind).toBe("frontier");
+    expect(replay.frames[1]?.visual?.sites[0]?.controller).toBe("ONE");
   });
 });
 

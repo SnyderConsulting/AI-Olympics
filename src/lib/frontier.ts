@@ -135,6 +135,19 @@ export type FrontierTickResult = {
   events: FrontierSimulationEvent[];
 };
 
+export type FrontierReplayVisual = {
+  kind: "frontier";
+  mapWidth: number;
+  mapHeight: number;
+  elapsedMs: number;
+  income: Record<FrontierOwner, number>;
+  winner: FrontierWinner | null;
+  winnerReason: FrontierWinnerReason | null;
+  bases: FrontierBase[];
+  sites: FrontierSite[];
+  armies: FrontierArmy[];
+};
+
 const FRONTIER_BASES: Record<FrontierOwner, { id: string; x: number; y: number; label: string }> = {
   ONE: {
     id: "one-base",
@@ -256,6 +269,74 @@ export function parseFrontierState(stateJson: string): FrontierState {
 
 export function serializeFrontierState(state: FrontierState): string {
   return JSON.stringify(state);
+}
+
+export function createFrontierReplayVisual(state: FrontierState): FrontierReplayVisual {
+  return {
+    kind: "frontier",
+    mapWidth: FRONTIER_MAP_WIDTH,
+    mapHeight: FRONTIER_MAP_HEIGHT,
+    elapsedMs: state.elapsedMs,
+    income: {
+      ONE: Number(state.income.ONE.toFixed(2)),
+      TWO: Number(state.income.TWO.toFixed(2)),
+    },
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    bases: state.bases.map((base) => ({ ...base })),
+    sites: state.sites.map((site) => ({ ...site })),
+    armies: state.armies.map((army) => ({
+      ...army,
+      order: { ...army.order },
+    })),
+  };
+}
+
+export function parseFrontierReplayVisual(value: unknown): FrontierReplayVisual | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const visual = value as Partial<FrontierReplayVisual>;
+
+  if (
+    visual.kind !== "frontier" ||
+    typeof visual.mapWidth !== "number" ||
+    typeof visual.mapHeight !== "number" ||
+    typeof visual.elapsedMs !== "number" ||
+    !visual.income ||
+    typeof visual.income !== "object" ||
+    !Array.isArray(visual.bases) ||
+    !Array.isArray(visual.sites) ||
+    !Array.isArray(visual.armies)
+  ) {
+    return null;
+  }
+
+  return {
+    kind: "frontier",
+    mapWidth: visual.mapWidth,
+    mapHeight: visual.mapHeight,
+    elapsedMs: visual.elapsedMs,
+    income: {
+      ONE: getIncomeValue(visual.income as Partial<Record<FrontierOwner, number>>, "ONE"),
+      TWO: getIncomeValue(visual.income as Partial<Record<FrontierOwner, number>>, "TWO"),
+    },
+    winner:
+      visual.winner === "ONE" || visual.winner === "TWO" || visual.winner === "DRAW"
+        ? visual.winner
+        : null,
+    winnerReason:
+      visual.winnerReason === "base-destroyed" ||
+      visual.winnerReason === "soldier-count" ||
+      visual.winnerReason === "site-control" ||
+      visual.winnerReason === "draw"
+        ? visual.winnerReason
+        : null,
+    bases: visual.bases as FrontierBase[],
+    sites: visual.sites as FrontierSite[],
+    armies: visual.armies as FrontierArmy[],
+  };
 }
 
 export function getFrontierOwner(isPlayerOne: boolean): FrontierOwner {

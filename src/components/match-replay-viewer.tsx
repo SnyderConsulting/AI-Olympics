@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
 
+import { FrontierReplayMap } from "@/components/frontier-replay-map";
 import { formatDateTime } from "@/lib/format";
 import type { MatchReplay } from "@/lib/match-replay";
 
@@ -45,7 +46,11 @@ export function MatchReplayViewer({ replay }: { replay: MatchReplay }) {
         />
       ) : null}
 
-      <pre className="board-preview">{frame.board}</pre>
+      {frame.visual?.kind === "frontier" ? (
+        <FrontierReplayMap visual={frame.visual} />
+      ) : (
+        <pre className="board-preview">{frame.board}</pre>
+      )}
     </div>
   );
 }
