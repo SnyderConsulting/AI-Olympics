@@ -705,6 +705,8 @@ function buildFrontierUserPrompt(args: {
   matchSecondsRemaining: number;
 }) {
   const opponent = getFrontierOpponent(args.owner);
+  const yourBase = args.state.bases.find((base) => base.owner === args.owner);
+  const enemyBase = args.state.bases.find((base) => base.owner === opponent);
   const ownArmies = args.state.armies
     .filter((army) => army.owner === args.owner)
     .map(serializeFrontierArmyForPrompt);
@@ -718,15 +720,36 @@ function buildFrontierUserPrompt(args: {
     controller: site.controller,
     captureOwner: site.captureOwner,
     captureProgressMs: site.captureProgressMs,
-  }));
-  const bases = args.state.bases.map((base) => ({
-    id: base.id,
-    owner: base.owner,
-    label: getFrontierOwnerLabel(base.owner),
-    x: base.x,
-    y: base.y,
-    alive: base.alive,
-  }));
+    distanceFromYou:
+      yourBase ? Number(Math.hypot(site.x - yourBase.x, site.y - yourBase.y).toFixed(2)) : null,
+    distanceFromEnemy:
+      enemyBase ? Number(Math.hypot(site.x - enemyBase.x, site.y - enemyBase.y).toFixed(2)) : null,
+  })).sort((left, right) => {
+    const leftDistance = left.distanceFromYou ?? Number.POSITIVE_INFINITY;
+    const rightDistance = right.distanceFromYou ?? Number.POSITIVE_INFINITY;
+
+    if (leftDistance !== rightDistance) {
+      return leftDistance - rightDistance;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+  const serializeBase = (owner: FrontierOwner) => {
+    const base = args.state.bases.find((candidate) => candidate.owner === owner);
+
+    if (!base) {
+      return null;
+    }
+
+    return {
+      id: base.id,
+      owner: base.owner,
+      label: getFrontierOwnerLabel(base.owner),
+      x: base.x,
+      y: base.y,
+      alive: base.alive,
+    };
+  };
 
   return [
     `Window ${args.currentWindowIndex + 1} closes in ${args.secondsUntilNextWindow.toFixed(2)} seconds.`,
@@ -742,11 +765,14 @@ function buildFrontierUserPrompt(args: {
     `Enemy armies:`,
     JSON.stringify(enemyArmies, null, 2),
     "",
+    `Your base:`,
+    JSON.stringify(serializeBase(args.owner), null, 2),
+    "",
+    `Enemy base:`,
+    JSON.stringify(serializeBase(opponent), null, 2),
+    "",
     `Sites:`,
     JSON.stringify(sites, null, 2),
-    "",
-    `Bases:`,
-    JSON.stringify(bases, null, 2),
   ].join("\n");
 }
 

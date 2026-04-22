@@ -47,10 +47,13 @@ Neutral resource sites:
 
 - `site_1` at `(25,15)`
 - `site_2` at `(25,45)`
-- `site_3` at `(42,22)`
-- `site_4` at `(42,38)`
-- `site_5` at `(58,22)`
-- `site_6` at `(58,38)`
+- `site_3` at `(50,22)`
+- `site_4` at `(50,38)`
+- `site_5` at `(75,15)`
+- `site_6` at `(75,45)`
+
+The site layout is mirrored east-to-west so neither seat gets shorter opening
+access to neutral income.
 
 ## Entities
 

@@ -166,10 +166,10 @@ const FRONTIER_BASES: Record<FrontierOwner, { id: string; x: number; y: number; 
 const FRONTIER_SITES: Array<{ id: string; x: number; y: number }> = [
   { id: "site_1", x: 25, y: 15 },
   { id: "site_2", x: 25, y: 45 },
-  { id: "site_3", x: 42, y: 22 },
-  { id: "site_4", x: 42, y: 38 },
-  { id: "site_5", x: 58, y: 22 },
-  { id: "site_6", x: 58, y: 38 },
+  { id: "site_3", x: 50, y: 22 },
+  { id: "site_4", x: 50, y: 38 },
+  { id: "site_5", x: 75, y: 15 },
+  { id: "site_6", x: 75, y: 45 },
 ];
 
 const PREVIEW_ARMY_LIMIT = 4;

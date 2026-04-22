@@ -24,6 +24,24 @@ describe("frontier engine", () => {
     expect(parseFrontierState(serializeFrontierState(state))).toEqual(state);
   });
 
+  it("keeps the resource site distances mirrored for both seats", () => {
+    const state = createInitialFrontierState();
+    const westBase = state.bases.find((base) => base.owner === "ONE");
+    const eastBase = state.bases.find((base) => base.owner === "TWO");
+
+    expect(westBase).toBeDefined();
+    expect(eastBase).toBeDefined();
+
+    const westDistances = state.sites
+      .map((site) => Math.hypot(site.x - westBase!.x, site.y - westBase!.y).toFixed(2))
+      .sort();
+    const eastDistances = state.sites
+      .map((site) => Math.hypot(site.x - eastBase!.x, site.y - eastBase!.y).toFixed(2))
+      .sort();
+
+    expect(westDistances).toEqual(eastDistances);
+  });
+
   it("captures a site after uncontested occupation", () => {
     const initial = createInitialFrontierState();
     initial.armies[0]!.x = 25;
