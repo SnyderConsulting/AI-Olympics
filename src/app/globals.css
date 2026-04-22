@@ -555,17 +555,56 @@ textarea {
   border-radius: 16px;
   display: grid;
   gap: 0.18rem;
-  min-height: 5.1rem;
+  min-height: 6.15rem;
   padding: 0.75rem 0.9rem;
 }
 
 .frontier-map__summary-card strong {
   color: var(--text);
+  line-height: 1.1;
 }
 
 .frontier-map__summary-card span {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.frontier-map__metrics {
+  display: grid;
+  gap: 0.2rem 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.frontier-map__metric {
+  align-items: center;
+  column-gap: 0.45rem;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.frontier-map__metric--wide {
+  grid-column: 1 / -1;
+}
+
+.frontier-map__metric-label,
+.frontier-map__metric-value,
+.frontier-map__summary-line {
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frontier-map__metric-label {
+  opacity: 0.82;
+}
+
+.frontier-map__metric-value {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .frontier-map__summary-card--west {
@@ -580,6 +619,10 @@ textarea {
 .frontier-map__summary-card--clock {
   place-items: center;
   text-align: center;
+}
+
+.frontier-map__summary-line--status {
+  max-width: 100%;
 }
 
 .frontier-map__surface {

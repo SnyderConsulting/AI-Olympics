@@ -47,20 +47,60 @@ export function FrontierReplayMap({ visual }: { visual: FrontierReplayVisual }) 
       <div className="frontier-map__summary">
         <div className="frontier-map__summary-card frontier-map__summary-card--west">
           <strong>West</strong>
-          <span>{westSoldiers} soldiers • {westSites} sites</span>
-          <span>Bank {visual.income.ONE.toFixed(2)}</span>
-          <span>Rate +{westRate}/s • Spawn {westNextSpawn}</span>
+          <div className="frontier-map__metrics">
+            <span className="frontier-map__metric">
+              <span className="frontier-map__metric-label">Soldiers</span>
+              <span className="frontier-map__metric-value">{westSoldiers}</span>
+            </span>
+            <span className="frontier-map__metric">
+              <span className="frontier-map__metric-label">Sites</span>
+              <span className="frontier-map__metric-value">{westSites}</span>
+            </span>
+            <span className="frontier-map__metric">
+              <span className="frontier-map__metric-label">Bank</span>
+              <span className="frontier-map__metric-value">{visual.income.ONE.toFixed(2)}</span>
+            </span>
+            <span className="frontier-map__metric">
+              <span className="frontier-map__metric-label">Rate</span>
+              <span className="frontier-map__metric-value">+{westRate}/s</span>
+            </span>
+            <span className="frontier-map__metric frontier-map__metric--wide">
+              <span className="frontier-map__metric-label">Spawn</span>
+              <span className="frontier-map__metric-value">{westNextSpawn}</span>
+            </span>
+          </div>
         </div>
         <div className="frontier-map__summary-card frontier-map__summary-card--clock">
           <strong>{formatFrontierClock(visual.elapsedMs)}</strong>
-          <span>{formatFrontierRemaining(visual.elapsedMs)} left</span>
-          <span>{visual.winner ? describeWinner(visual) : "In progress"}</span>
+          <span className="frontier-map__summary-line">{formatFrontierRemaining(visual.elapsedMs)} left</span>
+          <span className="frontier-map__summary-line frontier-map__summary-line--status">
+            {visual.winner ? describeWinner(visual) : "In progress"}
+          </span>
         </div>
         <div className="frontier-map__summary-card frontier-map__summary-card--east">
           <strong>East</strong>
-          <span>{eastSoldiers} soldiers • {eastSites} sites</span>
-          <span>Bank {visual.income.TWO.toFixed(2)}</span>
-          <span>Rate +{eastRate}/s • Spawn {eastNextSpawn}</span>
+          <div className="frontier-map__metrics">
+            <span className="frontier-map__metric">
+              <span className="frontier-map__metric-label">Soldiers</span>
+              <span className="frontier-map__metric-value">{eastSoldiers}</span>
+            </span>
+            <span className="frontier-map__metric">
+              <span className="frontier-map__metric-label">Sites</span>
+              <span className="frontier-map__metric-value">{eastSites}</span>
+            </span>
+            <span className="frontier-map__metric">
+              <span className="frontier-map__metric-label">Bank</span>
+              <span className="frontier-map__metric-value">{visual.income.TWO.toFixed(2)}</span>
+            </span>
+            <span className="frontier-map__metric">
+              <span className="frontier-map__metric-label">Rate</span>
+              <span className="frontier-map__metric-value">+{eastRate}/s</span>
+            </span>
+            <span className="frontier-map__metric frontier-map__metric--wide">
+              <span className="frontier-map__metric-label">Spawn</span>
+              <span className="frontier-map__metric-value">{eastNextSpawn}</span>
+            </span>
+          </div>
         </div>
       </div>
 
