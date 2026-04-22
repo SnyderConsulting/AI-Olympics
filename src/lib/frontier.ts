@@ -384,7 +384,7 @@ export function renderFrontierBoard(state: FrontierState): string {
   return [
     timeLine,
     `Bases | West ${baseOne.alive ? "alive" : "destroyed"} | East ${baseTwo.alive ? "alive" : "destroyed"}`,
-    `Income | West ${formatIncome(state.income.ONE)} (+${getFrontierIncomePerSecond(state, "ONE")}/s) | East ${formatIncome(state.income.TWO)} (+${getFrontierIncomePerSecond(state, "TWO")}/s)`,
+    `Economy | West bank ${formatIncome(state.income.ONE)} (+${getFrontierIncomePerSecond(state, "ONE")}/s, spawn ${formatFrontierSpawnEta(state, "ONE")}) | East bank ${formatIncome(state.income.TWO)} (+${getFrontierIncomePerSecond(state, "TWO")}/s, spawn ${formatFrontierSpawnEta(state, "TWO")})`,
     `Sites | ${sitesLine}`,
     `West armies | ${formatFrontierArmyPreview(state.armies.filter((army) => army.owner === "ONE"))}`,
     `East armies | ${formatFrontierArmyPreview(state.armies.filter((army) => army.owner === "TWO"))}`,
@@ -1070,6 +1070,22 @@ function formatFrontierSeconds(value: number) {
 
 function formatIncome(value: number) {
   return value.toFixed(2);
+}
+
+function formatFrontierSpawnEta(state: FrontierState, owner: FrontierOwner) {
+  const incomeRate = getFrontierIncomePerSecond(state, owner);
+
+  if (incomeRate <= 0) {
+    return "stalled";
+  }
+
+  const seconds = Math.max(0, (FRONTIER_SPAWN_COST - state.income[owner]) / incomeRate);
+
+  if (seconds <= 0.05) {
+    return "now";
+  }
+
+  return formatFrontierSeconds(seconds);
 }
 
 function clamp(value: number, minimum: number, maximum: number) {

@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 
 import {
   FRONTIER_MATCH_DURATION_MS,
+  FRONTIER_SPAWN_COST,
   type FrontierOwner,
   type FrontierReplayVisual,
 } from "@/lib/frontier";
@@ -34,14 +35,21 @@ export function FrontierReplayMap({ visual }: { visual: FrontierReplayVisual }) 
   const eastSoldiers = visual.armies
     .filter((army) => army.owner === "TWO")
     .reduce((sum, army) => sum + army.soldiers, 0);
+  const westSites = visual.sites.filter((site) => site.controller === "ONE").length;
+  const eastSites = visual.sites.filter((site) => site.controller === "TWO").length;
+  const westRate = 1 + westSites;
+  const eastRate = 1 + eastSites;
+  const westNextSpawn = formatSpawnEta(visual.income.ONE, westRate);
+  const eastNextSpawn = formatSpawnEta(visual.income.TWO, eastRate);
 
   return (
     <div className="frontier-map stack-s">
       <div className="frontier-map__summary">
         <div className="frontier-map__summary-card frontier-map__summary-card--west">
           <strong>West</strong>
-          <span>{westSoldiers} soldiers</span>
-          <span>{visual.income.ONE.toFixed(2)} income</span>
+          <span>{westSoldiers} soldiers • {westSites} sites</span>
+          <span>Bank {visual.income.ONE.toFixed(2)}</span>
+          <span>Rate +{westRate}/s • Spawn {westNextSpawn}</span>
         </div>
         <div className="frontier-map__summary-card frontier-map__summary-card--clock">
           <strong>{formatFrontierClock(visual.elapsedMs)}</strong>
@@ -50,8 +58,9 @@ export function FrontierReplayMap({ visual }: { visual: FrontierReplayVisual }) 
         </div>
         <div className="frontier-map__summary-card frontier-map__summary-card--east">
           <strong>East</strong>
-          <span>{eastSoldiers} soldiers</span>
-          <span>{visual.income.TWO.toFixed(2)} income</span>
+          <span>{eastSoldiers} soldiers • {eastSites} sites</span>
+          <span>Bank {visual.income.TWO.toFixed(2)}</span>
+          <span>Rate +{eastRate}/s • Spawn {eastNextSpawn}</span>
         </div>
       </div>
 
@@ -169,6 +178,24 @@ function formatFrontierClock(elapsedMs: number) {
 function formatFrontierRemaining(elapsedMs: number) {
   const remainingMs = Math.max(0, FRONTIER_MATCH_DURATION_MS - elapsedMs);
   return `${Math.floor(remainingMs / 60000)}:${String(Math.floor((remainingMs % 60000) / 1000)).padStart(2, "0")}`;
+}
+
+function formatSpawnEta(bankedIncome: number, incomeRate: number) {
+  if (incomeRate <= 0) {
+    return "stalled";
+  }
+
+  const seconds = Math.max(0, (FRONTIER_SPAWN_COST - bankedIncome) / incomeRate);
+
+  if (seconds <= 0.05) {
+    return "now";
+  }
+
+  if (seconds < 10) {
+    return `${seconds.toFixed(1)}s`;
+  }
+
+  return `${Math.ceil(seconds)}s`;
 }
 
 function describeWinner(visual: FrontierReplayVisual) {
