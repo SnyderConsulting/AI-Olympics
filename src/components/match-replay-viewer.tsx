@@ -3,6 +3,8 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
 
+import { CheckersReplayCanvas } from "@/components/checkers-replay-canvas";
+import { ChessReplayBoard } from "@/components/chess-replay-board";
 import { FrontierReplayMap } from "@/components/frontier-replay-map";
 import { TicTacToeReplayCanvas } from "@/components/tic-tac-toe-replay-canvas";
 import { formatDateTime } from "@/lib/format";
@@ -49,6 +51,10 @@ export function MatchReplayViewer({ replay }: { replay: MatchReplay }) {
 
       {frame.visual?.kind === "frontier" ? (
         <FrontierReplayMap visual={frame.visual} />
+      ) : frame.visual?.kind === "chess" ? (
+        <ChessReplayBoard visual={frame.visual} />
+      ) : frame.visual?.kind === "checkers" ? (
+        <CheckersReplayCanvas visual={frame.visual} />
       ) : frame.visual?.kind === "tic-tac-toe" ? (
         <TicTacToeReplayCanvas visual={frame.visual} />
       ) : (

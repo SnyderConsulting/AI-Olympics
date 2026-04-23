@@ -592,6 +592,110 @@ textarea {
   opacity: 0.82;
 }
 
+.checkers-canvas {
+  min-width: 0;
+}
+
+.checkers-canvas__surface {
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(235, 223, 206, 0.95));
+  border: 1px solid rgba(28, 24, 19, 0.12);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.checkers-canvas__element {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.checkers-canvas__legend {
+  color: var(--muted);
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.checkers-canvas__legend-item {
+  align-items: center;
+  background: rgba(255, 248, 238, 0.78);
+  border: 1px solid rgba(28, 24, 19, 0.08);
+  border-radius: 14px;
+  display: flex;
+  gap: 0.45rem;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0.65rem 0.8rem;
+}
+
+.checkers-canvas__legend-item strong,
+.checkers-canvas__legend-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkers-canvas__legend-item strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.checkers-canvas__legend-label {
+  opacity: 0.82;
+}
+
+.chess-replay {
+  min-width: 0;
+}
+
+.chess-replay__surface {
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(235, 223, 206, 0.95));
+  border: 1px solid rgba(28, 24, 19, 0.12);
+  border-radius: 20px;
+  padding: 0.85rem;
+}
+
+.chess-replay__legend {
+  color: var(--muted);
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chess-replay__legend-item {
+  align-items: center;
+  background: rgba(255, 248, 238, 0.78);
+  border: 1px solid rgba(28, 24, 19, 0.08);
+  border-radius: 14px;
+  display: flex;
+  gap: 0.45rem;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0.65rem 0.8rem;
+}
+
+.chess-replay__legend-item--wide {
+  grid-column: 1 / -1;
+}
+
+.chess-replay__legend-item strong,
+.chess-replay__legend-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chess-replay__legend-item strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.chess-replay__legend-label {
+  opacity: 0.82;
+}
+
 .frontier-map {
   min-width: 0;
 }
@@ -962,6 +1066,14 @@ textarea {
   }
 
   .tic-tac-toe-canvas__legend {
+    grid-template-columns: 1fr;
+  }
+
+  .checkers-canvas__legend {
+    grid-template-columns: 1fr;
+  }
+
+  .chess-replay__legend {
     grid-template-columns: 1fr;
   }
 }

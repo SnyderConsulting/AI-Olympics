@@ -2,16 +2,22 @@ import { AgentKind, MatchResult, MatchStatus } from "@/generated/prisma/enums";
 
 import { buildMatchReplay, type ReplayableMatch } from "@/lib/match-replay";
 import {
+  applyCheckersMove,
+  createInitialCheckersState,
+  serializeCheckersState,
+} from "@/lib/checkers";
+import {
+  applyChessMove,
+  createInitialChessState,
+  getLegalChessMoves,
+  serializeChessState,
+} from "@/lib/chess";
+import {
   createFrontierReplayVisual,
   createInitialFrontierState,
   serializeFrontierState,
 } from "@/lib/frontier";
-import {
-  applyTicTacToeForfeit,
-  applyTicTacToeMove,
-  createInitialTicTacToeState,
-  serializeTicTacToeState,
-} from "@/lib/tic-tac-toe";
+import { applyTicTacToeForfeit, applyTicTacToeMove, createInitialTicTacToeState, serializeTicTacToeState } from "@/lib/tic-tac-toe";
 import { describe, expect, it } from "vitest";
 
 const playerOne = {
@@ -108,6 +114,73 @@ describe("buildMatchReplay", () => {
     expect(replay.frames).toHaveLength(3);
     expect(replay.frames[2]?.isTerminal).toBe(true);
     expect(replay.frames[2]?.headline).toContain("timeout");
+  });
+
+  it("attaches structured visual data for checkers replay frames", () => {
+    const finalState = applyCheckersMove(createInitialCheckersState(), {
+      fromRow: 2,
+      fromColumn: 1,
+      sequence: [{ row: 3, column: 0 }],
+    });
+
+    const replay = buildMatchReplay(
+      createReplayableMatch({
+        gameKey: "checkers",
+        stateJson: serializeCheckersState(finalState),
+        moves: [
+          createMove(0, playerOne.id, {
+            notation: "2,1 -> 3,0",
+            from: { row: 2, column: 1 },
+            sequence: [{ row: 3, column: 0 }],
+          }),
+        ],
+      }),
+    );
+
+    expect(replay.unavailableReason).toBeNull();
+    expect(replay.frames[1]?.visual?.kind).toBe("checkers");
+    if (replay.frames[1]?.visual?.kind === "checkers") {
+      expect(replay.frames[1].visual.board[3]?.[0]?.color).toBe("RED");
+      expect(replay.frames[1].visual.lastMove?.from).toEqual({ row: 2, column: 1 });
+      expect(replay.frames[1].visual.lastMove?.sequence).toEqual([{ row: 3, column: 0 }]);
+    }
+  });
+
+  it("attaches structured visual data for chess replay frames", () => {
+    const initial = createInitialChessState();
+    const e4 = getLegalChessMoves(initial).find((move) => move.notation === "e4");
+
+    if (!e4) {
+      throw new Error("Expected e4 to be legal in the initial chess position.");
+    }
+
+    const finalState = applyChessMove(initial, e4);
+
+    const replay = buildMatchReplay(
+      createReplayableMatch({
+        gameKey: "chess",
+        stateJson: serializeChessState(finalState),
+        moves: [
+          createMove(0, playerOne.id, {
+            notation: e4.notation,
+            san: e4.san,
+            lan: e4.lan,
+            from: e4.from,
+            to: e4.to,
+          }),
+        ],
+      }),
+    );
+
+    expect(replay.unavailableReason).toBeNull();
+    expect(replay.frames[1]?.visual?.kind).toBe("chess");
+    if (replay.frames[1]?.visual?.kind === "chess") {
+      expect(replay.frames[1].visual.fen).toBe(finalState.fen);
+      expect(replay.frames[1].visual.nextPlayer).toBe("BLACK");
+      expect(replay.frames[1].visual.lastMove?.san).toBe("e4");
+      expect(replay.frames[1].visual.lastMove?.from).toBe("e2");
+      expect(replay.frames[1].visual.lastMove?.to).toBe("e4");
+    }
   });
 
   it("attaches structured visual data for frontier replay frames", () => {

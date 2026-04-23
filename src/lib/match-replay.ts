@@ -5,18 +5,27 @@ import {
   createInitialCheckersState,
   parseCheckersState,
   renderCheckersBoard,
+  type CheckersBoard,
+  type CheckersMove,
+  type CheckersPlayerColor,
   type CheckersPosition,
   type CheckersState,
+  type CheckersWinner,
+  type CheckersWinnerReason,
 } from "@/lib/checkers";
 import {
   applyChessMove,
   createInitialChessState,
   getLegalChessMoves,
+  hydrateChess,
   parseChessMoveNotation,
   parseChessState,
   renderChessBoard,
   type ChessMove,
+  type ChessPlayerColor,
   type ChessState,
+  type ChessWinner,
+  type ChessWinnerReason,
 } from "@/lib/chess";
 import {
   applyTicTacToeMove,
@@ -73,7 +82,30 @@ export type TicTacToeReplayVisual = {
   winningLine: [number, number][] | null;
 };
 
-export type MatchReplayVisual = FrontierReplayVisual | TicTacToeReplayVisual;
+export type CheckersReplayVisual = {
+  kind: "checkers";
+  board: CheckersBoard;
+  nextPlayer: CheckersPlayerColor;
+  winner: CheckersWinner | null;
+  winnerReason: CheckersWinnerReason | null;
+  lastMove: CheckersMove | null;
+};
+
+export type ChessReplayVisual = {
+  kind: "chess";
+  fen: string;
+  nextPlayer: ChessPlayerColor;
+  winner: ChessWinner | null;
+  winnerReason: ChessWinnerReason | null;
+  lastMove: ChessMove | null;
+  isCheck: boolean;
+};
+
+export type MatchReplayVisual =
+  | FrontierReplayVisual
+  | TicTacToeReplayVisual
+  | CheckersReplayVisual
+  | ChessReplayVisual;
 
 export function buildMatchReplay(match: ReplayableMatch): MatchReplay {
   try {
@@ -155,6 +187,7 @@ function buildCheckersReplay(match: ReplayableMatch): MatchReplay {
       index: 0,
       board: renderCheckersBoard(state.board),
       headline: "Initial position",
+      visual: createCheckersReplayVisual(state),
     }),
   ];
 
@@ -177,6 +210,7 @@ function buildCheckersReplay(match: ReplayableMatch): MatchReplay {
         createdAt: move.createdAt.toISOString(),
         headline: `${getActorName(match, move.agentId) ?? "Unknown agent"} played ${notation}`,
         notation,
+        visual: createCheckersReplayVisual(state),
       }),
     );
   }
@@ -191,6 +225,7 @@ function buildCheckersReplay(match: ReplayableMatch): MatchReplay {
       finalWinner: finalState.winner,
       finalWinnerReason: finalState.winnerReason,
       terminalHeadline: describeTerminalHeadline(match, finalState.winnerReason),
+      finalVisual: createCheckersReplayVisual(finalState),
     }),
     unavailableReason: null,
   };
@@ -203,6 +238,7 @@ function buildChessReplay(match: ReplayableMatch): MatchReplay {
       index: 0,
       board: renderChessBoard(state),
       headline: "Initial position",
+      visual: createChessReplayVisual(state),
     }),
   ];
 
@@ -220,6 +256,7 @@ function buildChessReplay(match: ReplayableMatch): MatchReplay {
         createdAt: move.createdAt.toISOString(),
         headline: `${getActorName(match, move.agentId) ?? "Unknown agent"} played ${notation}`,
         notation,
+        visual: createChessReplayVisual(state),
       }),
     );
   }
@@ -234,6 +271,7 @@ function buildChessReplay(match: ReplayableMatch): MatchReplay {
       finalWinner: finalState.winner,
       finalWinnerReason: finalState.winnerReason,
       terminalHeadline: describeTerminalHeadline(match, finalState.winnerReason),
+      finalVisual: createChessReplayVisual(finalState),
     }),
     unavailableReason: null,
   };
@@ -354,6 +392,51 @@ function createTicTacToeReplayVisual(state: TicTacToeState): TicTacToeReplayVisu
     winnerReason: state.winnerReason,
     winningLine: state.winningLine ? state.winningLine.map(([row, column]) => [row, column]) : null,
   };
+}
+
+function createCheckersReplayVisual(state: CheckersState): CheckersReplayVisual {
+  return {
+    kind: "checkers",
+    board: state.board.map((row) => row.map((cell) => (cell ? { ...cell } : null))),
+    nextPlayer: state.nextPlayer,
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    lastMove: cloneCheckersMove(state.lastMove),
+  };
+}
+
+function createChessReplayVisual(state: ChessState): ChessReplayVisual {
+  return {
+    kind: "chess",
+    fen: state.fen,
+    nextPlayer: getChessNextPlayer(state),
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    lastMove: cloneChessMove(state.lastMove),
+    isCheck: hydrateChess(state).isCheck(),
+  };
+}
+
+function cloneCheckersMove(move: CheckersMove | null): CheckersMove | null {
+  if (!move) {
+    return null;
+  }
+
+  return {
+    ...move,
+    from: { ...move.from },
+    sequence: move.sequence.map((position) => ({ ...position })),
+    captures: move.captures.map((position) => ({ ...position })),
+    piece: { ...move.piece },
+  };
+}
+
+function cloneChessMove(move: ChessMove | null): ChessMove | null {
+  return move ? { ...move } : null;
+}
+
+function getChessNextPlayer(state: ChessState): ChessPlayerColor {
+  return hydrateChess(state).turn() === "w" ? "WHITE" : "BLACK";
 }
 
 function getActorName(match: ReplayableMatch, agentId: string) {
