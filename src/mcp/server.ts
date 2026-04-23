@@ -11,28 +11,17 @@ import { env } from "@/lib/env";
 import { GAMES, GAME_KEYS } from "@/lib/games";
 import { ensureOfficialAgents } from "@/lib/official-agents";
 import {
-  getOAuthAuthorizationEndpointUrl,
   getOAuthAuthorizationServerBaseUrl,
   getOAuthProtectedResourceMetadataUrl,
-  getOAuthRegistrationEndpointUrl,
   getOAuthResourceUri,
   getOAuthTokenEndpointUrl,
   OAUTH_AGENT_GRANT_TYPE,
-  OAUTH_CODE_CHALLENGE_METHOD,
-  OAUTH_CONNECTOR_GRANT_TYPE,
-  OAUTH_REFRESH_GRANT_TYPE,
   OAUTH_SCOPE,
 } from "@/lib/oauth";
 import {
   authenticateAgentOAuthClientCredentials,
   authenticateOAuthAccessToken,
-  exchangeOAuthAuthorizationCode,
   exchangeOAuthClientCredentials,
-  exchangeOAuthRefreshToken,
-  getOAuthClientByClientId,
-  getOAuthClientRegistrationMetadata,
-  issueOAuthAuthorizationCodeForAgent,
-  registerOAuthDynamicClient,
 } from "@/lib/oauth-service";
 import {
   ensureMatchTimeoutWorker,
@@ -831,33 +820,6 @@ const app = createMcpExpressApp({ host: env.MCP_HOST });
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-const dynamicClientRegistrationSchema = z.object({
-  client_name: z.string().trim().min(1).max(120).optional(),
-  redirect_uris: z.array(z.string().trim().url()).min(1),
-  grant_types: z.array(z.string().trim()).optional(),
-  response_types: z.array(z.string().trim()).optional(),
-  token_endpoint_auth_method: z.literal("none").optional(),
-  scope: z.string().trim().optional(),
-});
-
-const authorizeRequestSchema = z.object({
-  client_id: z.string().trim().min(1),
-  redirect_uri: z.string().trim().url(),
-  response_type: z.literal("code"),
-  scope: z.string().trim().optional(),
-  state: z.string().optional(),
-  resource: z.string().trim().url().optional(),
-  code_challenge: z.string().trim().min(1),
-  code_challenge_method: z.literal(OAUTH_CODE_CHALLENGE_METHOD),
-});
-
-const authorizeApprovalSchema = authorizeRequestSchema.extend({
-  agent_client_id: z.string().trim().min(1),
-  agent_client_secret: z.string().trim().min(1),
-});
-
-type AuthorizeRequestInput = z.infer<typeof authorizeRequestSchema>;
-
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true });
 });
@@ -873,171 +835,11 @@ app.get("/.well-known/oauth-protected-resource", (_req, res) => {
 app.get("/.well-known/oauth-authorization-server", (_req, res) => {
   res.json({
     issuer: getOAuthAuthorizationServerBaseUrl(),
-    authorization_endpoint: getOAuthAuthorizationEndpointUrl(),
     token_endpoint: getOAuthTokenEndpointUrl(),
-    registration_endpoint: getOAuthRegistrationEndpointUrl(),
-    grant_types_supported: [
-      OAUTH_CONNECTOR_GRANT_TYPE,
-      OAUTH_REFRESH_GRANT_TYPE,
-      OAUTH_AGENT_GRANT_TYPE,
-    ],
-    token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
-    response_types_supported: ["code"],
-    code_challenge_methods_supported: [OAUTH_CODE_CHALLENGE_METHOD],
+    grant_types_supported: [OAUTH_AGENT_GRANT_TYPE],
+    token_endpoint_auth_methods_supported: ["client_secret_post", "client_secret_basic"],
     scopes_supported: [OAUTH_SCOPE],
   });
-});
-
-app.post("/register", async (req, res) => {
-  const rawBody = getObjectRecord(req.body);
-  const parsed = dynamicClientRegistrationSchema.safeParse(req.body);
-
-  if (!parsed.success) {
-    res.status(400).json({
-      error: "invalid_client_metadata",
-      error_description: parsed.error.issues[0]?.message ?? "Invalid OAuth client registration request.",
-    });
-    return;
-  }
-
-  try {
-    const oauthClient = await registerOAuthDynamicClient({
-      clientName: parsed.data.client_name,
-      redirectUris: parsed.data.redirect_uris,
-      grantTypes: parsed.data.grant_types,
-      responseTypes: parsed.data.response_types,
-      scope: parsed.data.scope,
-      metadata: rawBody,
-    });
-
-    res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Pragma", "no-cache");
-    res.status(201).json(getOAuthClientRegistrationMetadata(oauthClient));
-  } catch (error) {
-    res.status(400).json({
-      error: "invalid_client_metadata",
-      error_description: error instanceof Error ? error.message : "Unable to register OAuth client.",
-    });
-  }
-});
-
-app.get("/authorize", async (req, res) => {
-  const parsed = authorizeRequestSchema.safeParse(getStringRecord(req.query));
-
-  if (!parsed.success) {
-    res.status(400).type("html").send(
-      renderAuthorizePage({
-        request: null,
-        clientName: "Unknown client",
-        error: parsed.error.issues[0]?.message ?? "Invalid OAuth authorization request.",
-      }),
-    );
-    return;
-  }
-
-  const authorizationClient = await validateAuthorizationClient(parsed.data);
-
-  if ("error" in authorizationClient) {
-    res.status(400).type("html").send(
-      renderAuthorizePage({
-        request: parsed.data,
-        clientName: "Unknown client",
-        error: authorizationClient.error,
-      }),
-    );
-    return;
-  }
-
-  res.type("html").send(
-    renderAuthorizePage({
-      request: parsed.data,
-      clientName: authorizationClient.oauthClient.displayName ?? authorizationClient.oauthClient.clientId,
-    }),
-  );
-});
-
-app.post("/authorize", async (req, res) => {
-  const parsed = authorizeApprovalSchema.safeParse(getStringRecord(req.body));
-
-  if (!parsed.success) {
-    res.status(400).type("html").send(
-      renderAuthorizePage({
-        request: null,
-        clientName: "Unknown client",
-        error: parsed.error.issues[0]?.message ?? "Invalid OAuth approval request.",
-      }),
-    );
-    return;
-  }
-
-  const authorizationClient = await validateAuthorizationClient(parsed.data);
-
-  if ("error" in authorizationClient) {
-    res.status(400).type("html").send(
-      renderAuthorizePage({
-        request: parsed.data,
-        clientName: "Unknown client",
-        error: authorizationClient.error,
-      }),
-    );
-    return;
-  }
-
-  const agentClient = await authenticateAgentOAuthClientCredentials({
-    clientId: parsed.data.agent_client_id,
-    clientSecret: parsed.data.agent_client_secret,
-  });
-
-  if (!agentClient?.agent) {
-    res.status(401).type("html").send(
-      renderAuthorizePage({
-        request: parsed.data,
-        clientName: authorizationClient.oauthClient.displayName ?? authorizationClient.oauthClient.clientId,
-        error: "Invalid agent client credentials.",
-      }),
-    );
-    return;
-  }
-
-  try {
-    const authorizationCode = await issueOAuthAuthorizationCodeForAgent({
-      clientId: parsed.data.client_id,
-      agentId: agentClient.agent.id,
-      redirectUri: parsed.data.redirect_uri,
-      scope: parsed.data.scope,
-      resource: parsed.data.resource,
-      codeChallenge: parsed.data.code_challenge,
-      codeChallengeMethod: parsed.data.code_challenge_method,
-    });
-
-    if (!authorizationCode) {
-      res.status(400).type("html").send(
-        renderAuthorizePage({
-          request: parsed.data,
-          clientName: authorizationClient.oauthClient.displayName ?? authorizationClient.oauthClient.clientId,
-          error: "Unknown OAuth client.",
-        }),
-      );
-      return;
-    }
-
-    const redirectUrl = new URL(parsed.data.redirect_uri);
-    redirectUrl.searchParams.set("code", authorizationCode.authorizationCode);
-
-    if (parsed.data.state) {
-      redirectUrl.searchParams.set("state", parsed.data.state);
-    }
-
-    res.redirect(302, redirectUrl.toString());
-  } catch (error) {
-    res.status(400).type("html").send(
-      renderAuthorizePage({
-        request: parsed.data,
-        clientName: authorizationClient.oauthClient.displayName ?? authorizationClient.oauthClient.clientId,
-        error: error instanceof Error ? error.message : "Unable to issue authorization code.",
-      }),
-    );
-  }
 });
 
 app.post("/token", async (req, res) => {
@@ -1088,104 +890,9 @@ app.post("/token", async (req, res) => {
       return;
     }
 
-    if (body.grant_type === OAUTH_CONNECTOR_GRANT_TYPE) {
-      if (!body.client_id) {
-        res.status(401).json({
-          error: "invalid_client",
-          error_description: "Missing public OAuth client_id.",
-        });
-        return;
-      }
-
-      if (!body.code) {
-        res.status(400).json({
-          error: "invalid_request",
-          error_description: "Missing authorization code.",
-        });
-        return;
-      }
-
-      if (!body.redirect_uri) {
-        res.status(400).json({
-          error: "invalid_request",
-          error_description: "Missing redirect_uri.",
-        });
-        return;
-      }
-
-      if (!body.code_verifier) {
-        res.status(400).json({
-          error: "invalid_request",
-          error_description: "Missing code_verifier.",
-        });
-        return;
-      }
-
-      const tokenResponse = await exchangeOAuthAuthorizationCode({
-        clientId: body.client_id,
-        code: body.code,
-        redirectUri: body.redirect_uri,
-        codeVerifier: body.code_verifier,
-        resource: body.resource,
-      });
-
-      if (!tokenResponse) {
-        res.status(401).json({
-          error: "invalid_client",
-          error_description: "Invalid OAuth client.",
-        });
-        return;
-      }
-
-      res.json({
-        access_token: tokenResponse.accessToken,
-        token_type: tokenResponse.tokenType,
-        expires_in: tokenResponse.expiresIn,
-        scope: tokenResponse.scope,
-        resource: getOAuthResourceUri(),
-        refresh_token: tokenResponse.refreshToken,
-      });
-      return;
-    }
-
-    if (body.grant_type === OAUTH_REFRESH_GRANT_TYPE) {
-      if (!body.client_id) {
-        res.status(401).json({
-          error: "invalid_client",
-          error_description: "Missing public OAuth client_id.",
-        });
-        return;
-      }
-
-      if (!body.refresh_token) {
-        res.status(400).json({
-          error: "invalid_request",
-          error_description: "Missing refresh_token.",
-        });
-        return;
-      }
-
-      const tokenResponse = await exchangeOAuthRefreshToken({
-        clientId: body.client_id,
-        refreshToken: body.refresh_token,
-        resource: body.resource,
-      });
-
-      res.json({
-        access_token: tokenResponse.accessToken,
-        token_type: tokenResponse.tokenType,
-        expires_in: tokenResponse.expiresIn,
-        scope: tokenResponse.scope,
-        resource: getOAuthResourceUri(),
-        refresh_token: tokenResponse.refreshToken,
-      });
-      return;
-    }
-
     res.status(400).json({
       error: "unsupported_grant_type",
-      error_description:
-        `Supported grant types are ${OAUTH_CONNECTOR_GRANT_TYPE}, ${OAUTH_REFRESH_GRANT_TYPE}, and ${OAUTH_AGENT_GRANT_TYPE}.`,
+      error_description: `Supported grant type is ${OAUTH_AGENT_GRANT_TYPE}.`,
     });
   } catch (error) {
     res.status(400).json({
@@ -1309,14 +1016,6 @@ function getTokenRequestBody(req: Request) {
   return getStringRecord(req.body);
 }
 
-function getObjectRecord(rawValue: unknown) {
-  if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
-    return {} as Record<string, unknown>;
-  }
-
-  return rawValue as Record<string, unknown>;
-}
-
 function getConfidentialOAuthClientCredentials(
   req: Request,
   body: Record<string, string | undefined>,
@@ -1368,122 +1067,4 @@ function getSingleStringValue(value: unknown) {
   }
 
   return undefined;
-}
-
-async function validateAuthorizationClient(request: AuthorizeRequestInput) {
-  if ((request.scope ?? OAUTH_SCOPE) !== OAUTH_SCOPE) {
-    return {
-      error: `Unsupported scope. Use "${OAUTH_SCOPE}".`,
-    };
-  }
-
-  if ((request.resource ?? getOAuthResourceUri()) !== getOAuthResourceUri()) {
-    return {
-      error: "Unsupported resource indicator for this MCP server.",
-    };
-  }
-
-  const oauthClient = await getOAuthClientByClientId(request.client_id);
-
-  if (!oauthClient || oauthClient.clientType !== "PUBLIC") {
-    return {
-      error: "Unknown OAuth client.",
-    };
-  }
-
-  if (!oauthClient.grantTypes.includes(OAUTH_CONNECTOR_GRANT_TYPE)) {
-    return {
-      error: `OAuth client is not allowed to use ${OAUTH_CONNECTOR_GRANT_TYPE}.`,
-    };
-  }
-
-  if (!oauthClient.redirectUris.includes(request.redirect_uri)) {
-    return {
-      error: "Redirect URI is not registered for this OAuth client.",
-    };
-  }
-
-  return {
-    oauthClient,
-  };
-}
-
-function renderAuthorizePage(args: {
-  request: (AuthorizeRequestInput & { agent_client_id?: string; agent_client_secret?: string }) | null;
-  clientName: string;
-  error?: string;
-}) {
-  const hiddenFields = args.request
-    ? [
-        hiddenField("client_id", args.request.client_id),
-        hiddenField("redirect_uri", args.request.redirect_uri),
-        hiddenField("response_type", args.request.response_type),
-        hiddenField("scope", args.request.scope ?? OAUTH_SCOPE),
-        hiddenField("state", args.request.state ?? ""),
-        hiddenField("resource", args.request.resource ?? getOAuthResourceUri()),
-        hiddenField("code_challenge", args.request.code_challenge),
-        hiddenField("code_challenge_method", args.request.code_challenge_method),
-      ].join("\n")
-    : "";
-
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Authorize AI Olympics</title>
-  <style>
-    body { font-family: ui-sans-serif, system-ui, sans-serif; background: #f4efe6; color: #1f1a17; margin: 0; }
-    main { max-width: 720px; margin: 48px auto; padding: 0 20px; }
-    .card { background: #fffaf3; border: 1px solid #d8cfc2; border-radius: 18px; padding: 28px; box-shadow: 0 20px 40px rgba(65, 47, 31, 0.08); }
-    h1 { margin: 0 0 12px; font-size: 2rem; line-height: 1.1; }
-    p { line-height: 1.55; }
-    .muted { color: #5e544a; }
-    .meta { background: #f1e6d8; border-radius: 12px; padding: 14px; margin: 18px 0; word-break: break-word; }
-    .error { background: #f7d9d4; color: #6b1d12; border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; }
-    label { display: block; margin: 14px 0; font-weight: 600; }
-    input { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 12px 14px; border: 1px solid #c9bcab; border-radius: 12px; font: inherit; background: #fff; }
-    button { margin-top: 18px; padding: 12px 18px; border: 0; border-radius: 999px; background: #9f3b28; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
-    code { font-family: ui-monospace, SFMono-Regular, monospace; }
-  </style>
-</head>
-<body>
-  <main>
-    <section class="card">
-      <h1>Authorize ${escapeHtml(args.clientName)}</h1>
-      <p class="muted">Approve ChatGPT to act as one of your AI Olympics agents. Use the direct runtime client ID and secret that were issued when you registered the agent.</p>
-      <div class="meta">
-        <div><strong>Client:</strong> <code>${escapeHtml(args.clientName)}</code></div>
-        <div><strong>Resource:</strong> <code>${escapeHtml(args.request?.resource ?? getOAuthResourceUri())}</code></div>
-        <div><strong>Scope:</strong> <code>${escapeHtml(args.request?.scope ?? OAUTH_SCOPE)}</code></div>
-      </div>
-      ${args.error ? `<div class="error">${escapeHtml(args.error)}</div>` : ""}
-      <form method="post" action="/authorize">
-        ${hiddenFields}
-        <label>
-          Agent Client ID
-          <input name="agent_client_id" autocomplete="username" required value="${escapeHtml(args.request?.agent_client_id ?? "")}" />
-        </label>
-        <label>
-          Agent Client Secret
-          <input name="agent_client_secret" type="password" autocomplete="current-password" required value="" />
-        </label>
-        <button type="submit">Authorize ChatGPT</button>
-      </form>
-    </section>
-  </main>
-</body>
-</html>`;
-}
-
-function hiddenField(name: string, value: string) {
-  return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

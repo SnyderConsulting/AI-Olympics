@@ -1,22 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  derivePkceCodeChallengeS256,
-  getOAuthAuthorizationEndpointUrl,
+  getOAuthAuthorizationServerMetadataUrl,
   getOAuthProtectedResourceMetadataUrl,
-  getOAuthRegistrationEndpointUrl,
   getOAuthResourceUri,
   getOAuthTokenEndpointUrl,
   issueOAuthAccessToken,
-  issueOAuthAuthorizationCode,
   issueOAuthClientCredentials,
-  issueOAuthPublicClient,
   OAUTH_AGENT_GRANT_TYPE,
-  OAUTH_CONNECTOR_GRANT_TYPE,
-  OAUTH_REFRESH_GRANT_TYPE,
-  issueOAuthRefreshToken,
   verifyOAuthSecret,
-  verifyPkceCodeVerifier,
 } from "@/lib/oauth";
 
 describe("oauth helpers", () => {
@@ -29,15 +21,6 @@ describe("oauth helpers", () => {
     expect(verifyOAuthSecret("wrong-secret", issued.clientSecretHash)).toBe(false);
   });
 
-  it("issues public connector clients and authorization codes", () => {
-    const publicClient = issueOAuthPublicClient();
-    const authorizationCode = issueOAuthAuthorizationCode();
-
-    expect(publicClient.clientId).toMatch(/^aio_public_/);
-    expect(authorizationCode.code).toMatch(/^aio_code_/);
-    expect(authorizationCode.expiresAt.getTime()).toBeGreaterThan(Date.now());
-  });
-
   it("issues access tokens with a future expiry", () => {
     const issued = issueOAuthAccessToken();
 
@@ -45,40 +28,18 @@ describe("oauth helpers", () => {
     expect(issued.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
-  it("issues refresh tokens with a future expiry", () => {
-    const issued = issueOAuthRefreshToken();
-
-    expect(issued.refreshToken).toMatch(/^aio_rt_/);
-    expect(issued.expiresAt.getTime()).toBeGreaterThan(Date.now());
-  });
-
-  it("derives and verifies PKCE challenges", () => {
-    const verifier = "sample-verifier-123";
-    const challenge = derivePkceCodeChallengeS256(verifier);
-
-    expect(verifyPkceCodeVerifier({
-      codeVerifier: verifier,
-      expectedCodeChallenge: challenge,
-    })).toBe(true);
-    expect(verifyPkceCodeVerifier({
-      codeVerifier: "wrong-verifier",
-      expectedCodeChallenge: challenge,
-    })).toBe(false);
-  });
-
   it("derives OAuth metadata URLs from the MCP public URL", () => {
     expect(getOAuthResourceUri()).toBe("http://127.0.0.1:8787/mcp");
-    expect(getOAuthAuthorizationEndpointUrl()).toBe("http://127.0.0.1:8787/authorize");
+    expect(getOAuthAuthorizationServerMetadataUrl()).toBe(
+      "http://127.0.0.1:8787/.well-known/oauth-authorization-server",
+    );
     expect(getOAuthTokenEndpointUrl()).toBe("http://127.0.0.1:8787/token");
-    expect(getOAuthRegistrationEndpointUrl()).toBe("http://127.0.0.1:8787/register");
     expect(getOAuthProtectedResourceMetadataUrl()).toBe(
       "http://127.0.0.1:8787/.well-known/oauth-protected-resource",
     );
   });
 
-  it("exports the expected OAuth grant identifiers", () => {
+  it("exports the expected OAuth grant identifier", () => {
     expect(OAUTH_AGENT_GRANT_TYPE).toBe("client_credentials");
-    expect(OAUTH_CONNECTOR_GRANT_TYPE).toBe("authorization_code");
-    expect(OAUTH_REFRESH_GRANT_TYPE).toBe("refresh_token");
   });
 });

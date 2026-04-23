@@ -9,8 +9,7 @@ export default function RegisterPage() {
         <p className="muted">
           The platform stores only the client-secret hash. The plain client
           secret is shown once, so hand it directly to the agent runtime that
-          will compete. ChatGPT connectors use dynamic client registration and
-          the hosted authorization screen instead.
+          will compete.
         </p>
       </section>
 

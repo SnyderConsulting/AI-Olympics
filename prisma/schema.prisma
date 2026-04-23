@@ -30,117 +30,54 @@ enum AgentProvider {
   GOOGLE
 }
 
-enum OAuthClientType {
-  CONFIDENTIAL
-  PUBLIC
-}
-
-enum OAuthTokenEndpointAuthMethod {
-  NONE
-  CLIENT_SECRET_POST
-  CLIENT_SECRET_BASIC
-}
-
-enum OAuthCodeChallengeMethod {
-  S256
-}
-
 model Agent {
-  id                   String            @id @default(cuid())
-  slug                 String            @unique
+  id                   String           @id @default(cuid())
+  slug                 String           @unique
   name                 String
-  kind                 AgentKind         @default(USER)
+  kind                 AgentKind        @default(USER)
   provider             AgentProvider?
   modelId              String?
-  officialKey          String?           @unique
+  officialKey          String?          @unique
   ownerName            String
   ownerEmail           String?
   description          String?
-  aggregateRating      Float             @default(1200)
-  aggregateGamesPlayed Int               @default(0)
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  aggregateRating      Float            @default(1200)
+  aggregateGamesPlayed Int              @default(0)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
   oauthClients         OAuthClient[]
-  oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthAccessTokens    OAuthAccessToken[]
-  oauthRefreshTokens   OAuthRefreshToken[]
   queueEntries         QueueEntry[]
   ratings              Rating[]
   moves                MatchMove[]
-  matchesAsPlayerOne   Match[]           @relation("PlayerOneMatches")
-  matchesAsPlayerTwo   Match[]           @relation("PlayerTwoMatches")
-  wins                 Match[]           @relation("WinnerMatches")
+  matchesAsPlayerOne   Match[]          @relation("PlayerOneMatches")
+  matchesAsPlayerTwo   Match[]          @relation("PlayerTwoMatches")
+  wins                 Match[]          @relation("WinnerMatches")
 
   @@index([aggregateRating])
   @@index([kind, aggregateRating])
 }
 
 model OAuthClient {
-  id                      String                        @id @default(cuid())
-  clientId                String                        @unique
-  clientType              OAuthClientType               @default(CONFIDENTIAL)
-  tokenEndpointAuthMethod OAuthTokenEndpointAuthMethod  @default(CLIENT_SECRET_POST)
-  clientSecretHash        String?
-  clientSecretLabel       String?
-  displayName             String?
-  scope                   String                        @default("mcp")
-  redirectUris            String[]                      @default([])
-  grantTypes              String[]                      @default([])
-  responseTypes           String[]                      @default([])
-  metadataJson            String?
-  lastUsedAt              DateTime?
-  revokedAt               DateTime?
-  createdAt               DateTime                      @default(now())
-  updatedAt               DateTime                      @updatedAt
-  agentId                 String?
-  agent                   Agent?                        @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  authorizationCodes      OAuthAuthorizationCode[]
-  accessTokens            OAuthAccessToken[]
-  refreshTokens           OAuthRefreshToken[]
+  id                String             @id @default(cuid())
+  clientId          String             @unique
+  clientSecretHash  String
+  clientSecretLabel String
+  displayName       String?
+  scope             String             @default("mcp")
+  grantTypes        String[]           @default([])
+  lastUsedAt        DateTime?
+  revokedAt         DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  agentId           String
+  agent             Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  accessTokens      OAuthAccessToken[]
 
   @@index([agentId])
 }
 
-model OAuthAuthorizationCode {
-  id                 String                    @id @default(cuid())
-  codeHash           String                    @unique
-  redirectUri        String
-  scope              String
-  audience           String
-  codeChallenge      String
-  codeChallengeMethod OAuthCodeChallengeMethod
-  expiresAt          DateTime
-  usedAt             DateTime?
-  revokedAt          DateTime?
-  createdAt          DateTime                  @default(now())
-  oauthClientId      String
-  agentId            String
-  oauthClient        OAuthClient               @relation(fields: [oauthClientId], references: [id], onDelete: Cascade)
-  agent              Agent                     @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@index([agentId, expiresAt])
-  @@index([oauthClientId, expiresAt])
-}
-
 model OAuthAccessToken {
-  id            String      @id @default(cuid())
-  tokenHash     String      @unique
-  scope         String
-  audience      String
-  expiresAt     DateTime
-  lastUsedAt    DateTime?
-  revokedAt     DateTime?
-  createdAt     DateTime    @default(now())
-  oauthClientId String
-  agentId       String
-  oauthClient   OAuthClient @relation(fields: [oauthClientId], references: [id], onDelete: Cascade)
-  agent         Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@index([agentId, expiresAt])
-  @@index([oauthClientId, expiresAt])
-}
-
-model OAuthRefreshToken {
   id            String      @id @default(cuid())
   tokenHash     String      @unique
   scope         String

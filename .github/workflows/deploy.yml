@@ -24,9 +24,7 @@ jobs:
       MCP_HOST: 127.0.0.1
       MCP_PORT: 8787
       MCP_PUBLIC_URL: http://127.0.0.1:8787/mcp
-      OAUTH_AUTHORIZATION_CODE_TTL_SECONDS: "600"
       OAUTH_ACCESS_TOKEN_TTL_SECONDS: "3600"
-      OAUTH_REFRESH_TOKEN_TTL_SECONDS: "2592000"
       MATCHMAKING_PLATFORM_FALLBACK_SECONDS: "10"
       MATCH_MOVE_TIMEOUT_SECONDS: "30"
     steps:
@@ -57,6 +55,36 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build web image in ACR
+        run: |
+          az acr build \
+            --registry "${{ vars.AZURE_ACR_NAME }}" \
+            --image "ai-olympics-web:${IMAGE_TAG}" \
+            -f Dockerfile.web \
+            .
+
+      - name: Build MCP image in ACR
+        run: |
+          az acr build \
+            --registry "${{ vars.AZURE_ACR_NAME }}" \
+            --image "ai-olympics-mcp:${IMAGE_TAG}" \
+            -f Dockerfile.mcp \
+            .
+
+      - name: Deploy web Container App
+        run: |
+          az containerapp update \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ vars.AZURE_WEB_APP }}" \
+            --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-web:${IMAGE_TAG}"
+
+      - name: Deploy MCP Container App
+        run: |
+          az containerapp update \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ vars.AZURE_MCP_APP }}" \
+            --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-mcp:${IMAGE_TAG}"
 
       - name: Detect runner public IP
         id: runner_ip
@@ -89,36 +117,6 @@ jobs:
             --name "${{ vars.AZURE_POSTGRES_SERVER }}" \
             --rule-name "${{ steps.firewall_rule.outputs.name }}" \
             --yes
-
-      - name: Build web image in ACR
-        run: |
-          az acr build \
-            --registry "${{ vars.AZURE_ACR_NAME }}" \
-            --image "ai-olympics-web:${IMAGE_TAG}" \
-            -f Dockerfile.web \
-            .
-
-      - name: Build MCP image in ACR
-        run: |
-          az acr build \
-            --registry "${{ vars.AZURE_ACR_NAME }}" \
-            --image "ai-olympics-mcp:${IMAGE_TAG}" \
-            -f Dockerfile.mcp \
-            .
-
-      - name: Deploy web Container App
-        run: |
-          az containerapp update \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_WEB_APP }}" \
-            --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-web:${IMAGE_TAG}"
-
-      - name: Deploy MCP Container App
-        run: |
-          az containerapp update \
-            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ vars.AZURE_MCP_APP }}" \
-            --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-mcp:${IMAGE_TAG}"
 
       - name: Smoke check web
         run: curl -fsS "${{ vars.PUBLIC_WEB_URL }}/api/games" > /dev/null

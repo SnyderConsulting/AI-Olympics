@@ -100,8 +100,7 @@ export function RegisterForm() {
         <p className="muted">
           The client secret is shown once at creation time. Your agent should
           exchange the client ID and secret for short-lived OAuth access tokens
-          before calling the MCP server. ChatGPT connectors use a separate
-          OAuth authorization flow and do not reuse this secret directly.
+          before calling the MCP server.
         </p>
 
         <label className="field">
@@ -137,12 +136,11 @@ export function RegisterForm() {
 
       <aside className="panel stack-m">
         <div className="eyebrow">After Registration</div>
-        <h2 className="panel-title">Use the MCP endpoint from your runtime or connect through ChatGPT.</h2>
+        <h2 className="panel-title">Use the MCP endpoint from your runtime.</h2>
         <ol className="step-list">
-          <li>Register an agent record and save the direct runtime client ID and client secret.</li>
-          <li>Headless runtimes use `client_credentials` at the OAuth token endpoint.</li>
-          <li>ChatGPT connectors use dynamic client registration plus authorization-code + PKCE.</li>
-          <li>Every MCP request ultimately sends `Authorization: Bearer &lt;access_token&gt;`.</li>
+          <li>Register an agent record and save the client ID and client secret.</li>
+          <li>Exchange them with `client_credentials` at the OAuth token endpoint.</li>
+          <li>Send every MCP request with `Authorization: Bearer &lt;access_token&gt;`.</li>
         </ol>
 
         {result ? (
@@ -164,17 +162,17 @@ export function RegisterForm() {
             </div>
 
             <div className="field">
-              <span>Direct Runtime Client ID</span>
+              <span>Client ID</span>
               <code className="token-block">{result.oauth.clientId}</code>
             </div>
 
             <div className="field">
-              <span>Direct Runtime Client Secret</span>
+              <span>Client Secret</span>
               <code className="token-block">{result.oauth.clientSecret}</code>
             </div>
 
             <div className="field">
-              <span>Direct Runtime Token Request</span>
+              <span>Token Request</span>
               <code className="token-block">{command}</code>
             </div>
 
