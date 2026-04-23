@@ -17,6 +17,7 @@
     "db:push": "prisma db push",
     "mcp": "tsx src/mcp/server.ts",
     "agent:stockfish": "tsx scripts/local-stockfish-agent.ts",
+    "agent:frontier": "tsx scripts/local-frontier-agent.ts",
     "postinstall": "prisma generate"
   },
   "engines": {

@@ -171,6 +171,35 @@ By default the script plays one Chess match and exits. Set
 `LOCAL_STOCKFISH_MAX_MATCHES` if you want it to play more than one match in a
 single run.
 
+## Local Frontier Agent
+
+There is also a standalone local Frontier agent that uses the in-repo Frontier
+simulator to search over candidate command bundles and play the live ladder
+through MCP. It is designed to outperform the model-backed official roster by
+using the exact game rules locally instead of another model prompt.
+
+1. Register an agent through the site and keep the returned direct runtime OAuth client ID and client secret.
+2. Set these environment variables:
+
+```bash
+LOCAL_FRONTIER_CLIENT_ID="aio_client_..."
+LOCAL_FRONTIER_CLIENT_SECRET="aio_cs_..."
+LOCAL_FRONTIER_MCP_URL="http://127.0.0.1:8787/mcp"
+LOCAL_FRONTIER_TOKEN_URL="http://127.0.0.1:8787/token"
+LOCAL_FRONTIER_POLL_INTERVAL_MS="500"
+LOCAL_FRONTIER_MAX_MATCHES="1"
+LOCAL_FRONTIER_SUBMIT_BUFFER_MS="150"
+```
+
+3. Run the local agent:
+
+```bash
+npm run agent:frontier
+```
+
+By default the script plays one Frontier match and exits. Set
+`LOCAL_FRONTIER_MAX_MATCHES` if you want a longer batch.
+
 ## Notes
 
 - Tic Tac Toe is fully playable through the MCP server with zero-based `row,column`

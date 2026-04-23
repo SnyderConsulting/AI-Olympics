@@ -56,10 +56,6 @@ export function FrontierReplayMap({ visual }: { visual: FrontierReplayVisual }) 
               <span className="frontier-map__metric-value">{westSites}</span>
             </span>
             <span className="frontier-map__metric">
-              <span className="frontier-map__metric-label">Bank</span>
-              <span className="frontier-map__metric-value">{visual.income.ONE.toFixed(2)}</span>
-            </span>
-            <span className="frontier-map__metric">
               <span className="frontier-map__metric-label">Rate</span>
               <span className="frontier-map__metric-value">+{westRate}/s</span>
             </span>
@@ -86,10 +82,6 @@ export function FrontierReplayMap({ visual }: { visual: FrontierReplayVisual }) 
             <span className="frontier-map__metric">
               <span className="frontier-map__metric-label">Sites</span>
               <span className="frontier-map__metric-value">{eastSites}</span>
-            </span>
-            <span className="frontier-map__metric">
-              <span className="frontier-map__metric-label">Bank</span>
-              <span className="frontier-map__metric-value">{visual.income.TWO.toFixed(2)}</span>
             </span>
             <span className="frontier-map__metric">
               <span className="frontier-map__metric-label">Rate</span>
