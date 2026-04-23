@@ -23,8 +23,11 @@ import {
   createInitialTicTacToeState,
   parseTicTacToeState,
   renderTicTacToeBoard,
+  type TicTacToeBoard,
   type TicTacToeMark,
   type TicTacToeState,
+  type TicTacToeWinner,
+  type TicTacToeWinnerReason,
 } from "@/lib/tic-tac-toe";
 import {
   createFrontierReplayVisual,
@@ -51,7 +54,7 @@ export type MatchReplayFrame = {
   actorName: string | null;
   createdAt: string | null;
   isTerminal: boolean;
-  visual: FrontierReplayVisual | null;
+  visual: MatchReplayVisual | null;
 };
 
 export type MatchReplay = {
@@ -60,6 +63,17 @@ export type MatchReplay = {
 };
 
 type ReplayPayload = Record<string, unknown>;
+
+export type TicTacToeReplayVisual = {
+  kind: "tic-tac-toe";
+  board: TicTacToeBoard;
+  nextMark: TicTacToeMark;
+  winner: TicTacToeWinner | null;
+  winnerReason: TicTacToeWinnerReason | null;
+  winningLine: [number, number][] | null;
+};
+
+export type MatchReplayVisual = FrontierReplayVisual | TicTacToeReplayVisual;
 
 export function buildMatchReplay(match: ReplayableMatch): MatchReplay {
   try {
@@ -93,6 +107,7 @@ function buildTicTacToeReplay(match: ReplayableMatch): MatchReplay {
       index: 0,
       board: renderTicTacToeBoard(state.board),
       headline: "Initial position",
+      visual: createTicTacToeReplayVisual(state),
     }),
   ];
 
@@ -112,18 +127,22 @@ function buildTicTacToeReplay(match: ReplayableMatch): MatchReplay {
         createdAt: move.createdAt.toISOString(),
         headline: `${getActorName(match, move.agentId) ?? "Unknown agent"} played ${notation}`,
         notation,
+        visual: createTicTacToeReplayVisual(state),
       }),
     );
   }
+
+  const finalState = parseTicTacToeState(match.stateJson);
 
   return {
     frames: appendTerminalFrameIfNeeded({
       frames,
       currentState: state,
-      finalBoard: renderTicTacToeBoard(parseTicTacToeState(match.stateJson).board),
-      finalWinner: parseTicTacToeState(match.stateJson).winner,
-      finalWinnerReason: parseTicTacToeState(match.stateJson).winnerReason,
-      terminalHeadline: describeTerminalHeadline(match, parseTicTacToeState(match.stateJson).winnerReason),
+      finalBoard: renderTicTacToeBoard(finalState.board),
+      finalWinner: finalState.winner,
+      finalWinnerReason: finalState.winnerReason,
+      terminalHeadline: describeTerminalHeadline(match, finalState.winnerReason),
+      finalVisual: createTicTacToeReplayVisual(finalState),
     }),
     unavailableReason: null,
   };
@@ -282,7 +301,7 @@ function appendTerminalFrameIfNeeded<TState extends { winner: string | null; win
   finalWinner: string | null;
   finalWinnerReason: string | null;
   terminalHeadline: string;
-  finalVisual?: FrontierReplayVisual | null;
+  finalVisual?: MatchReplayVisual | null;
 }) {
   if (
     args.frames.length > 0 &&
@@ -312,7 +331,7 @@ function createReplayFrame(args: {
   actorName?: string | null;
   createdAt?: string | null;
   isTerminal?: boolean;
-  visual?: FrontierReplayVisual | null;
+  visual?: MatchReplayVisual | null;
 }): MatchReplayFrame {
   return {
     index: args.index,
@@ -323,6 +342,17 @@ function createReplayFrame(args: {
     createdAt: args.createdAt ?? null,
     isTerminal: args.isTerminal ?? false,
     visual: args.visual ?? null,
+  };
+}
+
+function createTicTacToeReplayVisual(state: TicTacToeState): TicTacToeReplayVisual {
+  return {
+    kind: "tic-tac-toe",
+    board: state.board.map((row) => [...row]),
+    nextMark: state.nextMark,
+    winner: state.winner,
+    winnerReason: state.winnerReason,
+    winningLine: state.winningLine ? state.winningLine.map(([row, column]) => [row, column]) : null,
   };
 }
 

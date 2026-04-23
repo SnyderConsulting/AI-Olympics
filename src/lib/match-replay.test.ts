@@ -77,6 +77,11 @@ describe("buildMatchReplay", () => {
     expect(replay.frames).toHaveLength(3);
     expect(replay.frames[1]?.headline).toContain("Agent One played 0,0");
     expect(replay.frames[2]?.board).toBe("  0 1 2\n0 X . .\n1 . O .\n2 . . .");
+    expect(replay.frames[2]?.visual?.kind).toBe("tic-tac-toe");
+    if (replay.frames[2]?.visual?.kind === "tic-tac-toe") {
+      expect(replay.frames[2].visual.board[0]?.[0]).toBe("X");
+      expect(replay.frames[2].visual.board[1]?.[1]).toBe("O");
+    }
   });
 
   it("adds a terminal timeout frame when the game ended without a final move", () => {
