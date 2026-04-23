@@ -4,7 +4,6 @@ import type { CSSProperties } from "react";
 
 import {
   FRONTIER_MATCH_DURATION_MS,
-  FRONTIER_SPAWN_COST,
   type FrontierOwner,
   type FrontierReplayVisual,
 } from "@/lib/frontier";
@@ -39,8 +38,8 @@ export function FrontierReplayMap({ visual }: { visual: FrontierReplayVisual }) 
   const eastSites = visual.sites.filter((site) => site.controller === "TWO").length;
   const westRate = 1 + westSites;
   const eastRate = 1 + eastSites;
-  const westNextSpawn = formatSpawnEta(visual.income.ONE, westRate);
-  const eastNextSpawn = formatSpawnEta(visual.income.TWO, eastRate);
+  const westBase = visual.bases.find((base) => base.owner === "ONE");
+  const eastBase = visual.bases.find((base) => base.owner === "TWO");
 
   return (
     <div className="frontier-map stack-s">
@@ -65,8 +64,8 @@ export function FrontierReplayMap({ visual }: { visual: FrontierReplayVisual }) 
               <span className="frontier-map__metric-value">+{westRate}/s</span>
             </span>
             <span className="frontier-map__metric frontier-map__metric--wide">
-              <span className="frontier-map__metric-label">Spawn</span>
-              <span className="frontier-map__metric-value">{westNextSpawn}</span>
+              <span className="frontier-map__metric-label">Base HP</span>
+              <span className="frontier-map__metric-value">{formatBaseHealth(westBase)}</span>
             </span>
           </div>
         </div>
@@ -97,8 +96,8 @@ export function FrontierReplayMap({ visual }: { visual: FrontierReplayVisual }) 
               <span className="frontier-map__metric-value">+{eastRate}/s</span>
             </span>
             <span className="frontier-map__metric frontier-map__metric--wide">
-              <span className="frontier-map__metric-label">Spawn</span>
-              <span className="frontier-map__metric-value">{eastNextSpawn}</span>
+              <span className="frontier-map__metric-label">Base HP</span>
+              <span className="frontier-map__metric-value">{formatBaseHealth(eastBase)}</span>
             </span>
           </div>
         </div>
@@ -220,24 +219,6 @@ function formatFrontierRemaining(elapsedMs: number) {
   return `${Math.floor(remainingMs / 60000)}:${String(Math.floor((remainingMs % 60000) / 1000)).padStart(2, "0")}`;
 }
 
-function formatSpawnEta(bankedIncome: number, incomeRate: number) {
-  if (incomeRate <= 0) {
-    return "stalled";
-  }
-
-  const seconds = Math.max(0, (FRONTIER_SPAWN_COST - bankedIncome) / incomeRate);
-
-  if (seconds <= 0.05) {
-    return "now";
-  }
-
-  if (seconds < 10) {
-    return `${seconds.toFixed(1)}s`;
-  }
-
-  return `${Math.ceil(seconds)}s`;
-}
-
 function describeWinner(visual: FrontierReplayVisual) {
   if (!visual.winner) {
     return "In progress";
@@ -248,4 +229,12 @@ function describeWinner(visual: FrontierReplayVisual) {
   }
 
   return `${OWNER_LABEL[visual.winner]} won${visual.winnerReason ? ` • ${visual.winnerReason.replaceAll("-", " ")}` : ""}`;
+}
+
+function formatBaseHealth(base: FrontierReplayVisual["bases"][number] | undefined) {
+  if (!base) {
+    return "n/a";
+  }
+
+  return `${base.health.toFixed(1)}/${base.maxHealth.toFixed(0)}`;
 }

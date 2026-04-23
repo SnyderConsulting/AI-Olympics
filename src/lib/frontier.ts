@@ -13,8 +13,8 @@ export const FRONTIER_ARMY_SPEED = 6;
 export const FRONTIER_MERGE_DISTANCE = 1;
 export const FRONTIER_ENGAGE_DISTANCE = 1.5;
 export const FRONTIER_ATTACKER_BONUS = 1.15;
-export const FRONTIER_BASE_DEFENSE = 8;
-export const FRONTIER_BASE_BONUS = 1.25;
+export const FRONTIER_BASE_MAX_HEALTH = 12;
+export const FRONTIER_BASE_DAMAGE_PER_SOLDIER_PER_SECOND = 1;
 
 export type FrontierOwner = "ONE" | "TWO";
 export type FrontierWinner = FrontierOwner | "DRAW";
@@ -25,6 +25,8 @@ export type FrontierBase = {
   owner: FrontierOwner;
   x: number;
   y: number;
+  health: number;
+  maxHealth: number;
   alive: boolean;
 };
 
@@ -119,6 +121,14 @@ export type FrontierSimulationEvent =
       siteId: string;
     }
   | {
+      type: "base-damaged";
+      damagedOwner: FrontierOwner;
+      attackerOwner: FrontierOwner;
+      attackerArmyId: string;
+      damage: number;
+      remainingHealth: number;
+    }
+  | {
       type: "base-destroyed";
       destroyedOwner: FrontierOwner;
       attackerOwner: FrontierOwner;
@@ -148,59 +158,82 @@ export type FrontierReplayVisual = {
   armies: FrontierArmy[];
 };
 
-const FRONTIER_BASES: Record<FrontierOwner, { id: string; x: number; y: number; label: string }> = {
-  ONE: {
-    id: "one-base",
-    x: 10,
-    y: 30,
-    label: "West",
-  },
-  TWO: {
-    id: "two-base",
-    x: 90,
-    y: 30,
-    label: "East",
-  },
+export type FrontierLayout = {
+  bases: Array<Pick<FrontierBase, "id" | "owner" | "x" | "y">>;
+  sites: Array<Pick<FrontierSite, "id" | "x" | "y">>;
 };
 
-const FRONTIER_SITES: Array<{ id: string; x: number; y: number }> = [
-  { id: "site_1", x: 25, y: 15 },
-  { id: "site_2", x: 25, y: 45 },
-  { id: "site_3", x: 50, y: 22 },
-  { id: "site_4", x: 50, y: 38 },
-  { id: "site_5", x: 75, y: 15 },
-  { id: "site_6", x: 75, y: 45 },
-];
+const FRONTIER_BASE_IDS: Record<FrontierOwner, string> = {
+  ONE: "one-base",
+  TWO: "two-base",
+};
+
+const FRONTIER_OWNER_LABELS: Record<FrontierOwner, string> = {
+  ONE: "West",
+  TWO: "East",
+};
+
+const FRONTIER_SITE_IDS = ["site_1", "site_2", "site_3", "site_4", "site_5", "site_6"] as const;
+const FRONTIER_BASE_MIN_X = 12;
+const FRONTIER_BASE_MAX_X = 20;
+const FRONTIER_BASE_MIN_Y = 12;
+const FRONTIER_BASE_MAX_Y = 48;
+const FRONTIER_SITE_MIN_X = 24;
+const FRONTIER_SITE_MAX_X = 45;
+const FRONTIER_SITE_MIN_Y = 8;
+const FRONTIER_SITE_MAX_Y = 52;
+const FRONTIER_MIN_SITE_DISTANCE = 10;
+const FRONTIER_MIN_SITE_TO_BASE_DISTANCE = 14;
+const FRONTIER_LAYOUT_ATTEMPTS = 200;
+
+const DEFAULT_FRONTIER_LAYOUT: FrontierLayout = {
+  bases: [
+    { id: FRONTIER_BASE_IDS.ONE, owner: "ONE", x: 16, y: 30 },
+    { id: FRONTIER_BASE_IDS.TWO, owner: "TWO", x: 84, y: 30 },
+  ],
+  sites: [
+    { id: "site_1", x: 28, y: 14 },
+    { id: "site_2", x: 34, y: 30 },
+    { id: "site_3", x: 28, y: 46 },
+    { id: "site_4", x: 72, y: 14 },
+    { id: "site_5", x: 66, y: 30 },
+    { id: "site_6", x: 72, y: 46 },
+  ],
+};
 
 const PREVIEW_ARMY_LIMIT = 4;
 
 export const FRONTIER_RULES_TEXT =
-  "Frontier is a simple real-time territory war game. Each side has one base, armies of soldiers, and resource sites on an open map. Bases always generate baseline income, controlled sites add more income, and soldiers spawn automatically at the base whenever enough income accrues. Agents only issue MOVE and ATTACK orders to whole army stacks. Orders persist until replaced. Combat resolves immediately and automatically when armies engage. The attacker gains a modest advantage unless both sides committed to the fight in the same command window. Bases are intentionally fragile enough that a territorial lead can convert into a real base kill. Win by destroying the enemy base, or if time expires by having more soldiers remaining, then more controlled sites.";
+  "Frontier is a simple real-time territory war game. Each side has one base, armies of soldiers, and resource sites on an open map. Each match generates a fresh left-right symmetric map layout so neither seat gets a baked-in distance advantage. Bases always generate baseline income, controlled sites add more income, and soldiers spawn automatically at the base whenever enough income accrues. Agents only issue MOVE and ATTACK orders to whole army stacks. Orders persist until replaced. Combat resolves immediately and automatically when armies engage. The attacker gains a modest advantage unless both sides committed to the fight in the same command window. Bases have health and lose it continuously while enemy soldiers attack them, so territorial leads can convert into real base kills. Win by destroying the enemy base, or if time expires by having more soldiers remaining, then more controlled sites.";
 
-export function createInitialFrontierState(): FrontierState {
+export function createInitialFrontierState(args?: {
+  random?: () => number;
+  layout?: FrontierLayout;
+}): FrontierState {
+  const layout = args?.layout ? cloneFrontierLayout(args.layout) : createRandomFrontierLayout(args?.random);
+  const westBase = layout.bases.find((base) => base.owner === "ONE");
+  const eastBase = layout.bases.find((base) => base.owner === "TWO");
+
+  if (!westBase || !eastBase) {
+    throw new Error("Frontier layout requires both bases.");
+  }
+
   return {
     elapsedMs: 0,
     income: {
       ONE: 0,
       TWO: 0,
     },
-    bases: [
-      {
-        id: FRONTIER_BASES.ONE.id,
-        owner: "ONE",
-        x: FRONTIER_BASES.ONE.x,
-        y: FRONTIER_BASES.ONE.y,
-        alive: true,
-      },
-      {
-        id: FRONTIER_BASES.TWO.id,
-        owner: "TWO",
-        x: FRONTIER_BASES.TWO.x,
-        y: FRONTIER_BASES.TWO.y,
-        alive: true,
-      },
-    ],
-    sites: FRONTIER_SITES.map((site) => ({
+    bases: layout.bases.map((base) => ({
+      id: base.id,
+      owner: base.owner,
+      x: base.x,
+      y: base.y,
+      health: FRONTIER_BASE_MAX_HEALTH,
+      maxHealth: FRONTIER_BASE_MAX_HEALTH,
+      alive: true,
+    })),
+    sites: layout.sites.map((site) => ({
       ...site,
       controller: null,
       captureOwner: null,
@@ -211,16 +244,16 @@ export function createInitialFrontierState(): FrontierState {
         id: "army-1",
         owner: "ONE",
         soldiers: FRONTIER_STARTING_SOLDIERS,
-        x: FRONTIER_BASES.ONE.x,
-        y: FRONTIER_BASES.ONE.y,
+        x: westBase.x,
+        y: westBase.y,
         order: { type: "IDLE" },
       },
       {
         id: "army-2",
         owner: "TWO",
         soldiers: FRONTIER_STARTING_SOLDIERS,
-        x: FRONTIER_BASES.TWO.x,
-        y: FRONTIER_BASES.TWO.y,
+        x: eastBase.x,
+        y: eastBase.y,
         order: { type: "IDLE" },
       },
     ],
@@ -236,7 +269,7 @@ export function createInitialFrontierState(): FrontierState {
 
 export function parseFrontierState(stateJson: string): FrontierState {
   const parsed = JSON.parse(stateJson) as Partial<FrontierState>;
-  const initial = createInitialFrontierState();
+  const initial = createInitialFrontierState({ layout: DEFAULT_FRONTIER_LAYOUT });
 
   return {
     elapsedMs: typeof parsed.elapsedMs === "number" ? parsed.elapsedMs : 0,
@@ -244,7 +277,9 @@ export function parseFrontierState(stateJson: string): FrontierState {
       ONE: getIncomeValue(parsed.income, "ONE"),
       TWO: getIncomeValue(parsed.income, "TWO"),
     },
-    bases: Array.isArray(parsed.bases) ? parsed.bases as FrontierBase[] : initial.bases,
+    bases: Array.isArray(parsed.bases)
+      ? parsed.bases.map((base) => normalizeFrontierBase(base))
+      : initial.bases,
     sites: Array.isArray(parsed.sites) ? parsed.sites as FrontierSite[] : initial.sites,
     armies: Array.isArray(parsed.armies) ? parsed.armies as FrontierArmy[] : initial.armies,
     pendingCommands: {
@@ -333,7 +368,7 @@ export function parseFrontierReplayVisual(value: unknown): FrontierReplayVisual 
       visual.winnerReason === "draw"
         ? visual.winnerReason
         : null,
-    bases: visual.bases as FrontierBase[],
+    bases: visual.bases.map((base) => normalizeFrontierBase(base)),
     sites: visual.sites as FrontierSite[],
     armies: visual.armies as FrontierArmy[],
   };
@@ -344,7 +379,7 @@ export function getFrontierOwner(isPlayerOne: boolean): FrontierOwner {
 }
 
 export function getFrontierOwnerLabel(owner: FrontierOwner) {
-  return FRONTIER_BASES[owner].label;
+  return FRONTIER_OWNER_LABELS[owner];
 }
 
 export function getFrontierOpponent(owner: FrontierOwner): FrontierOwner {
@@ -383,7 +418,7 @@ export function renderFrontierBoard(state: FrontierState): string {
 
   return [
     timeLine,
-    `Bases | West ${baseOne.alive ? "alive" : "destroyed"} | East ${baseTwo.alive ? "alive" : "destroyed"}`,
+    `Bases | West ${formatFrontierBaseHealth(baseOne)} | East ${formatFrontierBaseHealth(baseTwo)}`,
     `Economy | West bank ${formatIncome(state.income.ONE)} (+${getFrontierIncomePerSecond(state, "ONE")}/s, spawn ${formatFrontierSpawnEta(state, "ONE")}) | East bank ${formatIncome(state.income.TWO)} (+${getFrontierIncomePerSecond(state, "TWO")}/s, spawn ${formatFrontierSpawnEta(state, "TWO")})`,
     `Sites | ${sitesLine}`,
     `West armies | ${formatFrontierArmyPreview(state.armies.filter((army) => army.owner === "ONE"))}`,
@@ -453,7 +488,7 @@ export function tickFrontierState(
   moveFrontierArmies(nextState, deltaMs);
   mergeFriendlyFrontierArmies(nextState, events);
   resolveFrontierArmyBattles(nextState, events, random);
-  resolveFrontierBaseAttacks(nextState, events, random);
+  resolveFrontierBaseAttacks(nextState, deltaMs, events);
   updateFrontierSiteCapture(nextState, deltaMs, events);
 
   nextState.elapsedMs = Math.min(FRONTIER_MATCH_DURATION_MS, nextState.elapsedMs + deltaMs);
@@ -481,6 +516,12 @@ function accrueFrontierIncome(
   events: FrontierSimulationEvent[],
 ) {
   for (const owner of ["ONE", "TWO"] as const) {
+    const ownerBase = getFrontierBase(state, owner);
+
+    if (!ownerBase.alive) {
+      continue;
+    }
+
     state.income[owner] += getFrontierIncomePerSecond(state, owner) * (deltaMs / 1000);
 
     const spawnedSoldiers = Math.floor(state.income[owner] / FRONTIER_SPAWN_COST);
@@ -490,8 +531,9 @@ function accrueFrontierIncome(
     }
 
     state.income[owner] -= spawnedSoldiers * FRONTIER_SPAWN_COST;
-    const base = getFrontierBase(state, owner);
-    const baseArmy = state.armies.find((army) => army.owner === owner && distance(army, base) <= FRONTIER_MERGE_DISTANCE);
+    const baseArmy = state.armies.find(
+      (army) => army.owner === owner && distance(army, ownerBase) <= FRONTIER_MERGE_DISTANCE,
+    );
 
     if (baseArmy) {
       baseArmy.soldiers += spawnedSoldiers;
@@ -510,8 +552,8 @@ function accrueFrontierIncome(
       id: newArmyId,
       owner,
       soldiers: spawnedSoldiers,
-      x: base.x,
-      y: base.y,
+      x: ownerBase.x,
+      y: ownerBase.y,
       order: { type: "IDLE" },
     });
     events.push({
@@ -610,8 +652,8 @@ function resolveFrontierArmyBattles(
 
 function resolveFrontierBaseAttacks(
   state: FrontierState,
+  deltaMs: number,
   events: FrontierSimulationEvent[],
-  random: () => number,
 ) {
   if (state.winner) {
     return;
@@ -642,14 +684,25 @@ function resolveFrontierBaseAttacks(
         break;
       }
 
-      const rngArmy = toFrontierBattleRoll(random());
-      const rngBase = toFrontierBattleRoll(random());
-      const armyStrength = attacker.soldiers * FRONTIER_ATTACKER_BONUS * rngArmy;
-      const baseStrength = FRONTIER_BASE_DEFENSE * FRONTIER_BASE_BONUS * rngBase;
+      const damage = Number((attacker.soldiers * FRONTIER_BASE_DAMAGE_PER_SOLDIER_PER_SECOND * (deltaMs / 1000)).toFixed(2));
 
-      if (armyStrength > baseStrength) {
+      if (damage <= 0) {
+        continue;
+      }
+
+      defendingBase.health = Number(Math.max(0, defendingBase.health - damage).toFixed(2));
+      events.push({
+        type: "base-damaged",
+        damagedOwner: owner,
+        attackerOwner: attacker.owner,
+        attackerArmyId: attacker.id,
+        damage,
+        remainingHealth: defendingBase.health,
+      });
+
+      if (defendingBase.health <= 0) {
         defendingBase.alive = false;
-        state.armies = state.armies.filter((candidate) => candidate.id !== attacker.id);
+        defendingBase.health = 0;
         destroyedOwners.add(owner);
         events.push({
           type: "base-destroyed",
@@ -657,26 +710,7 @@ function resolveFrontierBaseAttacks(
           attackerOwner: attacker.owner,
           attackerArmyId: attacker.id,
         });
-        continue;
       }
-
-      state.armies = state.armies.filter((candidate) => candidate.id !== attacker.id);
-      events.push({
-        type: "battle",
-        location: { x: defendingBase.x, y: defendingBase.y },
-        attackerId: attacker.id,
-        defenderId: defendingBase.id,
-        attackerOwner: attacker.owner,
-        defenderOwner: owner,
-        attackerSoldiers: attacker.soldiers,
-        defenderSoldiers: FRONTIER_BASE_DEFENSE,
-        attackerRoll: rngArmy,
-        defenderRoll: rngBase,
-        attackerBonusApplied: true,
-        winnerOwner: owner,
-        winnerArmyId: defendingBase.id,
-        survivors: FRONTIER_BASE_DEFENSE,
-      });
     }
   }
 
@@ -933,6 +967,142 @@ function cloneFrontierState(state: FrontierState): FrontierState {
   };
 }
 
+function cloneFrontierLayout(layout: FrontierLayout): FrontierLayout {
+  return {
+    bases: layout.bases.map((base) => ({ ...base })),
+    sites: layout.sites.map((site) => ({ ...site })),
+  };
+}
+
+function createRandomFrontierLayout(random = Math.random): FrontierLayout {
+  for (let attempt = 0; attempt < FRONTIER_LAYOUT_ATTEMPTS; attempt += 1) {
+    const westBaseX = randomInteger(random, FRONTIER_BASE_MIN_X, FRONTIER_BASE_MAX_X);
+    const westBaseY = randomInteger(random, FRONTIER_BASE_MIN_Y, FRONTIER_BASE_MAX_Y);
+    const eastBaseX = FRONTIER_MAP_WIDTH - westBaseX;
+    const westBase = { x: westBaseX, y: westBaseY };
+    const westSites: Array<{ x: number; y: number }> = [];
+    let siteAttempts = 0;
+
+    while (westSites.length < 3 && siteAttempts < 500) {
+      siteAttempts += 1;
+      const candidate = {
+        x: randomInteger(random, Math.max(FRONTIER_SITE_MIN_X, westBaseX + 8), FRONTIER_SITE_MAX_X),
+        y: randomInteger(random, FRONTIER_SITE_MIN_Y, FRONTIER_SITE_MAX_Y),
+      };
+
+      if (distance(candidate, westBase) < FRONTIER_MIN_SITE_TO_BASE_DISTANCE) {
+        continue;
+      }
+
+      if (westSites.some((site) => distance(candidate, site) < FRONTIER_MIN_SITE_DISTANCE)) {
+        continue;
+      }
+
+      westSites.push(candidate);
+    }
+
+    if (westSites.length < 3) {
+      continue;
+    }
+
+    const mirroredSites = westSites
+      .slice()
+      .sort((left, right) => left.y - right.y || left.x - right.x)
+      .map((site, index) => ({
+        west: {
+          id: FRONTIER_SITE_IDS[index],
+          x: site.x,
+          y: site.y,
+        },
+        east: {
+          id: FRONTIER_SITE_IDS[index + 3],
+          x: FRONTIER_MAP_WIDTH - site.x,
+          y: site.y,
+        },
+      }));
+
+    const layout: FrontierLayout = {
+      bases: [
+        {
+          id: FRONTIER_BASE_IDS.ONE,
+          owner: "ONE",
+          x: westBaseX,
+          y: westBaseY,
+        },
+        {
+          id: FRONTIER_BASE_IDS.TWO,
+          owner: "TWO",
+          x: eastBaseX,
+          y: westBaseY,
+        },
+      ],
+      sites: mirroredSites.flatMap((pair) => [pair.west, pair.east]),
+    };
+
+    if (isFrontierLayoutSymmetric(layout)) {
+      return layout;
+    }
+  }
+
+  return cloneFrontierLayout(DEFAULT_FRONTIER_LAYOUT);
+}
+
+function isFrontierLayoutSymmetric(layout: FrontierLayout) {
+  const westBase = layout.bases.find((base) => base.owner === "ONE");
+  const eastBase = layout.bases.find((base) => base.owner === "TWO");
+
+  if (!westBase || !eastBase) {
+    return false;
+  }
+
+  const westDistances = layout.sites
+    .map((site) => Math.hypot(site.x - westBase.x, site.y - westBase.y).toFixed(3))
+    .sort();
+  const eastDistances = layout.sites
+    .map((site) => Math.hypot(site.x - eastBase.x, site.y - eastBase.y).toFixed(3))
+    .sort();
+
+  return JSON.stringify(westDistances) === JSON.stringify(eastDistances);
+}
+
+function normalizeFrontierBase(value: unknown): FrontierBase {
+  const base = value as Partial<FrontierBase> | undefined;
+
+  if (
+    !base ||
+    typeof base.id !== "string" ||
+    (base.owner !== "ONE" && base.owner !== "TWO") ||
+    typeof base.x !== "number" ||
+    typeof base.y !== "number"
+  ) {
+    throw new Error("Invalid frontier base.");
+  }
+
+  const maxHealth =
+    typeof base.maxHealth === "number" && base.maxHealth > 0
+      ? base.maxHealth
+      : FRONTIER_BASE_MAX_HEALTH;
+  const health = clamp(
+    typeof base.health === "number"
+      ? base.health
+      : base.alive === false
+        ? 0
+        : maxHealth,
+    0,
+    maxHealth,
+  );
+
+  return {
+    id: base.id,
+    owner: base.owner,
+    x: base.x,
+    y: base.y,
+    health,
+    maxHealth,
+    alive: typeof base.alive === "boolean" ? base.alive : health > 0,
+  };
+}
+
 function getFrontierBase(state: FrontierState, owner: FrontierOwner) {
   const base = state.bases.find((candidate) => candidate.owner === owner);
 
@@ -1052,6 +1222,14 @@ function formatFrontierArmyPreview(armies: FrontierArmy[]) {
   return preview.join(" | ");
 }
 
+function formatFrontierBaseHealth(base: FrontierBase) {
+  if (!base.alive) {
+    return `0.0/${base.maxHealth.toFixed(0)} destroyed`;
+  }
+
+  return `${base.health.toFixed(1)}/${base.maxHealth.toFixed(0)} alive`;
+}
+
 function formatFrontierOrderPreview(order: FrontierArmyOrder) {
   if (order.type === "IDLE") {
     return "idle";
@@ -1090,6 +1268,10 @@ function formatFrontierSpawnEta(state: FrontierState, owner: FrontierOwner) {
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function randomInteger(random: () => number, minimum: number, maximum: number) {
+  return Math.floor(random() * (maximum - minimum + 1)) + minimum;
 }
 
 function toFrontierBattleRoll(value: number) {

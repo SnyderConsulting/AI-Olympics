@@ -1084,6 +1084,8 @@ export async function getFrontierMatchStateForAgent(args: {
       label: getFrontierOwnerLabel(base.owner),
       x: base.x,
       y: base.y,
+      health: base.health,
+      maxHealth: base.maxHealth,
       alive: base.alive,
     })),
     pendingSubmission:
@@ -2072,6 +2074,16 @@ function describeFrontierEvent(match: MatchWithDetails, event: FrontierSimulatio
         actorName: participant.name,
         headline: `${participant.name} captured ${event.siteId}`,
         notation: event.siteId,
+      };
+    }
+    case "base-damaged": {
+      const attacker = getFrontierParticipantForOwner(match, event.attackerOwner);
+      const defender = getFrontierParticipantForOwner(match, event.damagedOwner);
+      return {
+        agentId: attacker.id,
+        actorName: attacker.name,
+        headline: `${attacker.name} damaged ${defender.name}'s base for ${event.damage.toFixed(2)}`,
+        notation: `${defender.name} base ${event.remainingHealth.toFixed(2)} HP`,
       };
     }
     case "base-destroyed": {

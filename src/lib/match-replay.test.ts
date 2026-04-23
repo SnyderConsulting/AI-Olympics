@@ -207,6 +207,12 @@ describe("buildMatchReplay", () => {
     expect(replay.frames[0]?.visual?.kind).toBe("frontier");
     expect(replay.frames[1]?.visual?.kind).toBe("frontier");
     expect(replay.frames[1]?.visual?.sites[0]?.controller).toBe("ONE");
+    if (replay.frames[0]?.visual?.kind === "frontier") {
+      expect(replay.frames[0].visual.bases).toEqual(state.bases);
+      expect(replay.frames[0].visual.sites.map((site) => ({ id: site.id, x: site.x, y: site.y }))).toEqual(
+        state.sites.map((site) => ({ id: site.id, x: site.x, y: site.y })),
+      );
+    }
   });
 });
 

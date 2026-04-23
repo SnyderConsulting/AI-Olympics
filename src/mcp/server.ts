@@ -210,6 +210,8 @@ const frontierStateOutputSchema = {
       label: z.string(),
       x: z.number(),
       y: z.number(),
+      health: z.number().nonnegative(),
+      maxHealth: z.number().positive(),
       alive: z.boolean(),
     }),
   ),

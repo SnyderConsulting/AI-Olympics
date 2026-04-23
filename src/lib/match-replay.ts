@@ -278,7 +278,22 @@ function buildChessReplay(match: ReplayableMatch): MatchReplay {
 }
 
 function buildFrontierReplay(match: ReplayableMatch): MatchReplay {
-  const initialState = createInitialFrontierState();
+  const finalState = parseFrontierState(match.stateJson);
+  const initialState = createInitialFrontierState({
+    layout: {
+      bases: finalState.bases.map((base) => ({
+        id: base.id,
+        owner: base.owner,
+        x: base.x,
+        y: base.y,
+      })),
+      sites: finalState.sites.map((site) => ({
+        id: site.id,
+        x: site.x,
+        y: site.y,
+      })),
+    },
+  });
   const frames: MatchReplayFrame[] = [
     createReplayFrame({
       index: 0,
@@ -315,8 +330,6 @@ function buildFrontierReplay(match: ReplayableMatch): MatchReplay {
       }),
     );
   }
-
-  const finalState = parseFrontierState(match.stateJson);
 
   return {
     frames: appendTerminalFrameIfNeeded<FrontierState>({

@@ -37,23 +37,15 @@ first version of the rules used by the platform.
 - Map size: `100 x 60`
 - No obstacles in v1
 - Full information, no fog of war
+- Each match generates a fresh left-right symmetric layout
 
-Base locations:
+Layout rules:
 
-- Player 1 base: `(10,30)`
-- Player 2 base: `(90,30)`
-
-Neutral resource sites:
-
-- `site_1` at `(25,15)`
-- `site_2` at `(25,45)`
-- `site_3` at `(50,22)`
-- `site_4` at `(50,38)`
-- `site_5` at `(75,15)`
-- `site_6` at `(75,45)`
-
-The site layout is mirrored east-to-west so neither seat gets shorter opening
-access to neutral income.
+- West base spawns somewhere on the left side of the map
+- East base is mirrored to the right side at the same `y`
+- Six neutral resource sites are generated as three mirrored pairs
+- Every generated layout keeps both seats equally distant from the same set of
+  sites, so there is no built-in opening travel advantage
 
 ## Entities
 
@@ -61,12 +53,13 @@ access to neutral income.
 
 - Immobile
 - Produces soldiers automatically from income
+- Has persistent health that degrades while enemy armies attack it
 - If destroyed, its owner loses immediately
 
-Suggested combat values:
+Suggested values:
 
-- `base_defense = 8`
-- `base_bonus = 1.25`
+- `base_health = 12`
+- `base_damage_per_soldier_per_second = 1`
 
 ### Resource site
 
@@ -239,20 +232,17 @@ This means:
 
 ### Army versus base resolution
 
-Base combat also resolves instantly.
+Base combat is not a one-roll duel.
 
-Suggested base effective strength:
+Instead:
 
-- `base_defense * base_bonus * rng`
+- an army attacking the enemy base deals continuous damage while in contact
+- damage per tick is based on the number of soldiers currently in that army
+- the army remains on the field while attacking
+- the base is destroyed once its health reaches `0`
 
-If the attacking army wins:
-
-- the base is destroyed
-- the match ends immediately
-
-If the base wins:
-
-- the attacking army is removed
+This makes territorial pressure convert into a visible base-health race instead
+of a binary instant kill.
 
 ## Win conditions
 
@@ -299,6 +289,7 @@ Replay should log:
 - combat start
 - combat RNG rolls
 - combat winner and surviving soldiers
+- base damage events and remaining base health
 - base destruction or time-expiry result
 
 Because combat resolves immediately, replay can stay compact while still fully

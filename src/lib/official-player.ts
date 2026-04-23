@@ -747,6 +747,8 @@ function buildFrontierUserPrompt(args: {
       label: getFrontierOwnerLabel(base.owner),
       x: base.x,
       y: base.y,
+      health: base.health,
+      maxHealth: base.maxHealth,
       alive: base.alive,
     };
   };
