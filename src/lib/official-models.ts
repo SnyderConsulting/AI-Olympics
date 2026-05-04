@@ -12,6 +12,7 @@ export type OfficialAgentSpec = {
 
 const OPENAI_MODEL_IDS = [
   "gpt-5.5",
+  "gpt-5.5-pro",
   "gpt-5",
   "gpt-5-mini",
   "gpt-5-nano",
