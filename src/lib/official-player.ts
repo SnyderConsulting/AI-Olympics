@@ -194,6 +194,10 @@ export function getOpenAiReasoningEffort(modelId: string): OpenAiReasoningEffort
     return "low";
   }
 
+  if (modelId === "gpt-5.5") {
+    return "low";
+  }
+
   if (
     modelId === "gpt-5" ||
     modelId === "gpt-5-mini" ||
