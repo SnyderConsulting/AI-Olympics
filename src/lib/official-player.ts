@@ -36,13 +36,14 @@ const REQUEST_TIMEOUT_MS = env.MATCH_MOVE_TIMEOUT_SECONDS * 1000;
 const MAX_MOVE_OUTPUT_TOKENS = 256;
 const MAX_FRONTIER_OUTPUT_TOKENS = 768;
 const MAX_PROVIDER_RETRIES = 2;
+const MOVE_SELECTION_FUNCTION_NAME = "select_move";
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 const FRONTIER_REQUEST_TIMEOUT_MS = Math.max(
   1_000,
   Math.min(REQUEST_TIMEOUT_MS, FRONTIER_COMMAND_WINDOW_MS - 500),
 );
 
-type OpenAiReasoningEffort = "minimal" | "low";
+type OpenAiReasoningEffort = "none" | "minimal" | "low";
 
 export async function chooseOfficialTicTacToeMove(args: {
   provider: AgentProvider;
@@ -195,7 +196,7 @@ export function getOpenAiReasoningEffort(modelId: string): OpenAiReasoningEffort
   }
 
   if (modelId === "gpt-5.5") {
-    return "low";
+    return "none";
   }
 
   if (
@@ -253,14 +254,21 @@ async function requestOpenAiMoveNotation(args: {
         instructions: args.systemPrompt,
         input: args.userPrompt,
         max_output_tokens: MAX_MOVE_OUTPUT_TOKENS,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "move_selection",
+        tools: [
+          {
+            type: "function",
+            name: MOVE_SELECTION_FUNCTION_NAME,
+            description:
+              "Select exactly one legal move notation for the current game turn.",
+            parameters: createOpenAiMoveSelectionSchema(args.legalMoveNotations),
             strict: true,
-            schema: createOpenAiMoveSelectionSchema(args.legalMoveNotations),
           },
+        ],
+        tool_choice: {
+          type: "function",
+          name: MOVE_SELECTION_FUNCTION_NAME,
         },
+        parallel_tool_calls: false,
         ...(getOpenAiReasoningEffort(args.modelId)
           ? {
               reasoning: {
@@ -275,6 +283,8 @@ async function requestOpenAiMoveNotation(args: {
       output_text?: string;
       output?: Array<{
         type?: string;
+        name?: string;
+        arguments?: string;
         content?: Array<{
           type?: string;
           text?: string;
@@ -296,7 +306,10 @@ async function requestOpenAiMoveNotation(args: {
       );
     }
 
-    return extractOpenAiText(payload);
+    return (
+      extractOpenAiFunctionCallArguments(payload, MOVE_SELECTION_FUNCTION_NAME) ??
+      extractOpenAiText(payload)
+    );
   }
 
   throw new Error(`OpenAI request retries exhausted for ${args.modelId}.`);
@@ -561,6 +574,23 @@ function extractOpenAiText(payload: {
       .map((item) => item.text ?? "")
       .join("") ?? ""
   );
+}
+
+function extractOpenAiFunctionCallArguments(
+  payload: {
+    output?: Array<{
+      type?: string;
+      name?: string;
+      arguments?: string;
+    }>;
+  },
+  functionName: string,
+) {
+  const functionCall = payload.output?.find(
+    (item) => item.type === "function_call" && item.name === functionName,
+  );
+
+  return functionCall?.arguments ?? null;
 }
 
 function formatLegalMoveNotations<TMove extends { notation: string }>(moves: readonly TMove[]) {

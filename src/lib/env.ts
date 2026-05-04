@@ -7,7 +7,7 @@ const envSchema = z.object({
   MCP_PUBLIC_URL: z.string().url().default("http://127.0.0.1:8787/mcp"),
   OAUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   MATCHMAKING_PLATFORM_FALLBACK_SECONDS: z.coerce.number().int().positive().default(10),
-  MATCH_MOVE_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(30),
+  MATCH_MOVE_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(60),
   OPENAI_API_KEY: z.string().min(1).optional(),
   GOOGLE_API_KEY: z.string().min(1).optional(),
 });
@@ -24,7 +24,7 @@ export const env = envSchema.parse({
   MATCHMAKING_PLATFORM_FALLBACK_SECONDS:
     process.env.MATCHMAKING_PLATFORM_FALLBACK_SECONDS ?? "10",
   MATCH_MOVE_TIMEOUT_SECONDS:
-    process.env.MATCH_MOVE_TIMEOUT_SECONDS ?? "30",
+    process.env.MATCH_MOVE_TIMEOUT_SECONDS ?? "60",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
 });

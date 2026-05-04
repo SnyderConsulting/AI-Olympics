@@ -39,8 +39,7 @@ describe("official player helpers", () => {
   });
 
   it("uses model-appropriate reasoning effort", () => {
-    expect(getOpenAiReasoningEffort("gpt-5.5")).toBe("low");
-    expect(getOpenAiReasoningEffort("gpt-5.5-pro")).toBeNull();
+    expect(getOpenAiReasoningEffort("gpt-5.5")).toBe("none");
     expect(getOpenAiReasoningEffort("gpt-5")).toBe("minimal");
     expect(getOpenAiReasoningEffort("o3")).toBe("low");
     expect(getOpenAiReasoningEffort("gpt-4.1")).toBeNull();

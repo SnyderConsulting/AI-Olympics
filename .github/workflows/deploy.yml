@@ -26,7 +26,7 @@ jobs:
       MCP_PUBLIC_URL: http://127.0.0.1:8787/mcp
       OAUTH_ACCESS_TOKEN_TTL_SECONDS: "3600"
       MATCHMAKING_PLATFORM_FALLBACK_SECONDS: "10"
-      MATCH_MOVE_TIMEOUT_SECONDS: "30"
+      MATCH_MOVE_TIMEOUT_SECONDS: "60"
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -77,6 +77,7 @@ jobs:
           az containerapp update \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ vars.AZURE_WEB_APP }}" \
+            --set-env-vars MATCH_MOVE_TIMEOUT_SECONDS=60 \
             --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-web:${IMAGE_TAG}"
 
       - name: Deploy MCP Container App
@@ -84,6 +85,7 @@ jobs:
           az containerapp update \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ vars.AZURE_MCP_APP }}" \
+            --set-env-vars MATCH_MOVE_TIMEOUT_SECONDS=60 \
             --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-mcp:${IMAGE_TAG}"
 
       - name: Detect runner public IP
