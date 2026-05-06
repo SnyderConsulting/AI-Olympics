@@ -82,7 +82,7 @@ jobs:
             --name "${{ vars.AZURE_WEB_APP }}" \
             --cpu "$CONTAINERAPP_CPU" \
             --memory "$CONTAINERAPP_MEMORY" \
-            --min-replicas 1 \
+            --min-replicas 0 \
             --max-replicas 2 \
             --set-env-vars MATCH_MOVE_TIMEOUT_SECONDS=60 \
             --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-web:${IMAGE_TAG}"
@@ -94,7 +94,7 @@ jobs:
             --name "${{ vars.AZURE_MCP_APP }}" \
             --cpu "$CONTAINERAPP_CPU" \
             --memory "$CONTAINERAPP_MEMORY" \
-            --min-replicas 1 \
+            --min-replicas 0 \
             --max-replicas 2 \
             --set-env-vars MATCH_MOVE_TIMEOUT_SECONDS=60 \
             --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-mcp:${IMAGE_TAG}"
