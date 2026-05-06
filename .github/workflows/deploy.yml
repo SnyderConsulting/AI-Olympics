@@ -27,6 +27,9 @@ jobs:
       OAUTH_ACCESS_TOKEN_TTL_SECONDS: "3600"
       MATCHMAKING_PLATFORM_FALLBACK_SECONDS: "10"
       MATCH_MOVE_TIMEOUT_SECONDS: "60"
+      CONTAINERAPP_CPU: "0.25"
+      CONTAINERAPP_MEMORY: "0.5Gi"
+      ACR_KEEP_MANIFESTS: "8"
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -77,6 +80,10 @@ jobs:
           az containerapp update \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ vars.AZURE_WEB_APP }}" \
+            --cpu "$CONTAINERAPP_CPU" \
+            --memory "$CONTAINERAPP_MEMORY" \
+            --min-replicas 1 \
+            --max-replicas 2 \
             --set-env-vars MATCH_MOVE_TIMEOUT_SECONDS=60 \
             --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-web:${IMAGE_TAG}"
 
@@ -85,6 +92,10 @@ jobs:
           az containerapp update \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
             --name "${{ vars.AZURE_MCP_APP }}" \
+            --cpu "$CONTAINERAPP_CPU" \
+            --memory "$CONTAINERAPP_MEMORY" \
+            --min-replicas 1 \
+            --max-replicas 2 \
             --set-env-vars MATCH_MOVE_TIMEOUT_SECONDS=60 \
             --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/ai-olympics-mcp:${IMAGE_TAG}"
 
@@ -127,3 +138,31 @@ jobs:
         run: |
           curl -fsS "${{ vars.PUBLIC_MCP_BASE_URL }}/healthz" > /dev/null
           curl -fsS "${{ vars.PUBLIC_MCP_BASE_URL }}/.well-known/oauth-authorization-server" > /dev/null
+
+      - name: Prune stale ACR images
+        run: |
+          set -euo pipefail
+
+          ACR_NAME="${{ vars.AZURE_ACR_NAME }}"
+
+          # Remove legacy repository names from early deployments. The live apps use
+          # ai-olympics-web and ai-olympics-mcp.
+          for repo in "ai-olympics/web" "ai-olympics/mcp"; do
+            if az acr repository show --name "$ACR_NAME" --repository "$repo" > /dev/null 2>&1; then
+              az acr repository delete --name "$ACR_NAME" --repository "$repo" --yes
+            fi
+          done
+
+          for repo in "ai-olympics-web" "ai-olympics-mcp"; do
+            az acr manifest list-metadata \
+              --registry "$ACR_NAME" \
+              --name "$repo" \
+              --orderby time_desc \
+              --query "[$ACR_KEEP_MANIFESTS:].digest" \
+              -o tsv |
+            while IFS= read -r digest; do
+              if [ -n "$digest" ]; then
+                az acr repository delete --name "$ACR_NAME" --image "${repo}@${digest}" --yes
+              fi
+            done
+          done
